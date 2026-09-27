@@ -1,6 +1,8 @@
 # Demo: the Treechat app on a real phone (AWS Device Farm, metered). Same
 # read-only walk as demo-treechat.jevb: types a username into sign-up but
 # never submits.
+# Needs a Treechat app build (not public); point --app at your own .apk/.ipa
+# and adjust the steps to your app.
 #   jevb run examples/demo-treechat-app.jevb --device "pixel 9" --app treechat.apk
 #   jevb run examples/demo-treechat-app.jevb --device "iphone 14" --app treechat.ipa
 pace human

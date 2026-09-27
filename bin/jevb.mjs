@@ -7,6 +7,10 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+// Settings and credentials from ./.env (see .env.example). Variables already
+// set in the shell win.
+if (fs.existsSync('.env')) { try { process.loadEnvFile('.env') } catch {} }
+
 const PORT = Number(process.env.JEVB_PORT || 7788)
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 

@@ -1,7 +1,31 @@
-# jev-browser (`jevb`)
+# jevb
 
-On-demand headless Chromium for agents and tests, steered by
-[Jev](https://docs.typesafe.ai) (TypeSafe System One).
+Plain-English browser and phone tests for agents and CI. You write
+`act go to create a new account` and `check is a sign-up form shown?`, and
+[Jev](https://docs.typesafe.ai) (TypeSafe System One) picks the element and
+judges the page in ~150–300ms. It drives headless Chromium on demand, and
+real iPhones and Android phones through AWS Device Farm or a local Appium
+server. It runs at human pace by default, or as fast as possible.
+
+> Status: experimental. Plain Playwright with selectors is faster per step;
+> jevb trades speed for selector-free steps and plain-English checks.
+
+## What you need
+
+| | Required for | Where it goes |
+|---|---|---|
+| TypeSafe API key | everything | `TYPESAFEAI_API_KEY` |
+| AWS credentials with Device Farm access | real phones (optional, metered) | `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY`, or an AWS profile |
+
+```bash
+git clone https://github.com/mitya777/jevb && cd jevb && npm install
+npx playwright-core install chromium-headless-shell
+cp .env.example .env     # fill in the key(s)
+node bin/jevb.mjs run examples/treechat-signup-nav.jevb   # or `npm link` for `jevb`
+```
+
+The `examples/` run read-only against the public site treechat.com (the
+project this was built to test). They never post, sign in or pay.
 
 - **On demand.** Nothing runs until the first action. The CLI starts a
   localhost daemon if needed. The daemon launches Chromium on first use and
@@ -23,14 +47,6 @@ On-demand headless Chromium for agents and tests, steered by
   - `agent` (`--pace agent`, `JEVB_PACE=agent`, or `pace agent` in a
     scenario): as fast as possible. It uses direct clicks and `fill()`, and
     waits only on the page (load + network idle, capped at 3s).
-
-## Setup
-
-```bash
-npm install          # playwright-core 1.57; reuses ~/Library/Caches/ms-playwright
-npx playwright-core install chromium-headless-shell   # only if not already installed
-export TYPESAFEAI_API_KEY=...   # or put it in ./.env
-```
 
 ## CLI (one JSON object per command; exit 1 on error or failed check)
 
@@ -76,8 +92,9 @@ billed from allocation until the session stops. jevb stops it on `close`,
 (default 3 min) with no commands. Getting a device usually takes a minute or
 more.
 
-Setup: a Device-Farm-only IAM key in an AWS profile named `jevb`, which jevb
-uses automatically and which doesn't expire:
+Setup: any AWS credentials with Device Farm access (in `.env`, or the
+standard AWS chain). The narrowest option is a Device-Farm-only IAM key in an
+AWS profile named `jevb`, which jevb picks up automatically:
 
 ```bash
 aws iam create-user --user-name jevb
@@ -174,9 +191,9 @@ apps usually build clickable rows and pills.
 an analytics call). It then waits for the new page to commit, load, and for
 its text to stop changing, so checks never judge a blank page.
 
-Library use: `import { JevBrowser, runScenario } from 'jev-browser'`.
+Library use: `import { JevBrowser, JevDevice, runScenario } from 'jevb'`.
 
-## Cost / speed (measured 2026-09-26)
+## Cost / speed (measured 2026-09-26, against treechat.com)
 
 - `examples/tour-treechat.jevb`: landing → scroll end/top → Explore →
   Hot/Now → Reply (sign-up popup) → close → Channels → Home. 16 checks and
@@ -187,3 +204,7 @@ Library use: `import { JevBrowser, runScenario } from 'jev-browser'`.
 - Fixture flow (type, click, 2 checks): ~2.5s at agent pace, ~6s at human pace.
 - Jev calls: 140–310ms each.
 - Chromium cold start: 220–400ms.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

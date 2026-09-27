@@ -4,10 +4,11 @@
 // session stops, so callers must stop() promptly (the device backend does on
 // close, idle and daemon exit). Device Farm only runs in us-west-2.
 //
-// Credentials: the standard AWS chain (AWS_PROFILE, AWS_ACCESS_KEY_ID/…,
-// ~/.aws). Project: JEVB_DF_PROJECT_ARN, else a project named "jevb"
+// Credentials: profile "jevb" if present (see profile()), else the standard
+// AWS chain (AWS_PROFILE, AWS_ACCESS_KEY_ID/…, ~/.aws). Project: JEVB_DF_PROJECT_ARN, else a project named "jevb"
 // (created on first use).
 import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import {
     CreateProjectCommand, CreateRemoteAccessSessionCommand, CreateUploadCommand, DeviceFarmClient,
@@ -17,7 +18,16 @@ import {
 
 const PROJECT_NAME = 'jevb'
 let client
-const df = () => (client ||= new DeviceFarmClient({ region: 'us-west-2' }))
+// A long-lived, Device-Farm-only IAM key in profile "jevb" (README) beats a
+// console login that expires; JEVB_AWS_PROFILE picks another profile, and
+// without either the standard chain applies (AWS_PROFILE, env keys, login).
+function profile() {
+    if (process.env.JEVB_AWS_PROFILE) return process.env.JEVB_AWS_PROFILE
+    const creds = path.join(os.homedir(), '.aws', 'credentials')
+    try { if (/^\[jevb\]\s*$/m.test(fs.readFileSync(creds, 'utf8'))) return 'jevb' } catch {}
+    return undefined
+}
+const df = () => (client ||= new DeviceFarmClient({ region: 'us-west-2', profile: profile() }))
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 export async function projectArn() {

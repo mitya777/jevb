@@ -76,8 +76,17 @@ billed from allocation until the session stops. jevb stops it on `close`,
 (default 3 min) with no commands. Getting a device usually takes a minute or
 more.
 
-Setup: AWS credentials in the standard chain (`AWS_PROFILE` or
-`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`) with Device Farm access. The
+Setup: a Device-Farm-only IAM key in an AWS profile named `jevb`, which jevb
+uses automatically and which doesn't expire:
+
+```bash
+aws iam create-user --user-name jevb
+aws iam attach-user-policy --user-name jevb --policy-arn arn:aws:iam::aws:policy/AWSDeviceFarmFullAccess
+aws iam create-access-key --user-name jevb --query 'AccessKey.[AccessKeyId,SecretAccessKey]' --output text | read id secret && aws configure set aws_access_key_id "$id" --profile jevb && aws configure set aws_secret_access_key "$secret" --profile jevb && aws configure set region us-west-2 --profile jevb
+```
+
+(`JEVB_AWS_PROFILE` picks a different profile. Without one, the standard chain applies:
+`AWS_PROFILE`, env keys, or `aws login`.) The
 project is `JEVB_DF_PROJECT_ARN`, or a project named `jevb` that is created on first use.
 Device Farm is us-west-2 only. `--app` takes a local `.apk`/`.ipa` (uploaded),
 an https/s3 URL, an upload ARN, or an installed bundle id / package name. An

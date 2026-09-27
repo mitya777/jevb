@@ -1,0 +1,11 @@
+# Demo: read-only walk through Treechat's logged-out flow. Types a name into
+# the signup form but never submits it.
+open https://app.treechat.com/
+check is this a login page?
+act go to create a new account
+check is a sign-up form shown?
+type the display name field => jevb demo
+refute is an error or "not found" page shown?
+act go back to the login page
+check is this a login page?
+wait 1500

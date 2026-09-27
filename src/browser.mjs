@@ -2,6 +2,7 @@
 // a page; after `idleMs` with no actions the browser is closed and relaunched
 // (fresh) on the next one. Sessions are named browser contexts.
 import { chromium } from 'playwright-core'
+import { OVERLAY } from './demo.mjs'
 import { ask } from './jev.mjs'
 import * as pace from './pace.mjs'
 import { pageState, shortlist, snapshot } from './snapshot.mjs'
@@ -10,8 +11,10 @@ const DEFAULT_IDLE_MS = Number(process.env.JEVB_IDLE_MS || 120_000)
 
 export class JevBrowser {
     constructor({ idleMs = DEFAULT_IDLE_MS, pace: p, headless = process.env.JEVB_HEADED !== '1',
-        viewport = { width: 1280, height: 800 }, minConfidence = 0.5, log = () => {} } = {}) {
-        Object.assign(this, { idleMs, headless, viewport, minConfidence, log })
+        viewport = { width: 1280, height: 800 }, minConfidence = 0.5, log = () => {},
+        demo = process.env.JEVB_DEMO === '1', videoDir = process.env.JEVB_VIDEO || null } = {}) {
+        Object.assign(this, { idleMs, headless, viewport, minConfidence, log, demo, videoDir })
+        this.step = ''
         this.pace = pace.resolvePace(p)
         this.browser = null
         this.launching = null
@@ -47,8 +50,17 @@ export class JevBrowser {
         const b = this.browser
         this.browser = null
         if (reason === 'idle') for (const name of this.sessions.keys()) this.expired.add(name)
+        // Close contexts first so recorded videos are finalized to disk.
+        const videos = []
+        for (const { context, page } of this.sessions.values()) {
+            const v = page.video()
+            await context.close().catch(() => {})
+            if (v) videos.push(await v.path().catch(() => null))
+        }
         this.sessions.clear()
         if (b) { await b.close().catch(() => {}); this.log(`chromium down (${reason})`) }
+        for (const v of videos.filter(Boolean)) this.log(`video: ${v}`)
+        return { videos: videos.filter(Boolean) }
     }
 
     async page(name = 'default', { fresh = false } = {}) {
@@ -60,11 +72,22 @@ export class JevBrowser {
         let s = this.sessions.get(name)
         if (s && !s.page.isClosed()) return s.page
         const browser = await this.ensureBrowser()
-        const context = await browser.newContext({ viewport: this.viewport })
+        const context = await browser.newContext({
+            viewport: this.viewport,
+            ...(this.videoDir && { recordVideo: { dir: this.videoDir, size: this.viewport } }),
+        })
+        if (this.demo) await context.addInitScript(OVERLAY)
         const page = await context.newPage()
         s = { context, page }
         this.sessions.set(name, s)
         return page
+    }
+
+    // Demo HUD: line 1 = current step, line 2 = what Jev decided.
+    async hud(page, result = '') {
+        if (!this.demo || !page) return
+        const text = `[${this.pace}] ${this.step}${result ? `\n→ ${result}` : ''}`
+        await page.evaluate((t) => window.__jevbHud?.(t), text).catch(() => {})
     }
 
     status() {
@@ -76,6 +99,7 @@ export class JevBrowser {
     async open(url, { session, pace: p } = {}) {
         const page = await this.page(session, { fresh: true })
         const res = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45_000 })
+        await this.hud(page, `loaded ${page.url()}`)
         await pace.settle(page, pace.resolvePace(p || this.pace))
         return { url: page.url(), status: res?.status() ?? null, title: await page.title() }
     }
@@ -98,6 +122,7 @@ export class JevBrowser {
         const top = Object.entries(a.probabilities || {}).sort((x, y) => y[1] - x[1]).slice(0, 3)
             .filter(([id, p], i) => i === 0 || p >= 0.01).map(([id, p]) => ({ id, p: +p.toFixed(3), desc: criteria[id] }))
         const result = { id: a.choice, confidence: a.confidence, desc: criteria[a.choice], jevMs: Date.now() - t, top }
+        await this.hud(page, `Jev picked ${result.desc.replace(/ at \d+,\d+$/, '')}  conf ${a.confidence.toFixed(2)}  ${result.jevMs}ms`)
         if (a.choice === 'none' || a.confidence < this.minConfidence) {
             throw Object.assign(new Error(`no confident match for "${intent}"`), { code: 'NO_MATCH', detail: result })
         }
@@ -143,6 +168,8 @@ export class JevBrowser {
             check: { type: 'noul', instructions: `Looking at the current page (\`visible_text\`, \`url\`, \`title\`): ${question}` },
         })
         const noul = answers.check.noul
+        const ok = negate ? noul < threshold : noul >= threshold
+        await this.hud(page, `Jev noul ${noul.toFixed(2)} ${negate ? '<' : '≥'} ${threshold}  ${ok ? 'PASS ✓' : 'FAIL ✗'}  ${Date.now() - t}ms`)
         return { question, noul, threshold, negate, pass: negate ? noul < threshold : noul >= threshold, jevMs: Date.now() - t }
     }
 

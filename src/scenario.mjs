@@ -35,6 +35,8 @@ export async function runScenario(file, { pace, baseUrl, onStep = console.log } 
         for (const s of steps) {
             const t = Date.now()
             let out
+            b.step = s.src
+            if (b.demo && b.sessions.size) await b.hud(await b.page().catch(() => null)).catch(() => {})
             try {
                 switch (s.cmd) {
                     case 'pace': b.pace = s.arg; out = { pace: s.arg }; break
@@ -66,7 +68,7 @@ export async function runScenario(file, { pace, baseUrl, onStep = console.log } 
             if (out.error) break // later steps depend on page state; stop at first error
         }
     } finally {
-        await b.shutdown('scenario done')
+        var { videos } = await b.shutdown('scenario done')
     }
-    return { failed, results }
+    return { failed, results, videos }
 }

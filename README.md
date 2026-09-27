@@ -46,6 +46,8 @@ jevb stop
 ```
 
 Use `--session NAME` for parallel contexts and `JEVB_HEADED=1` to watch.
+`JEVB_DEMO=1` draws a visible cursor plus a HUD (step, and what Jev picked
+with its confidence). `JEVB_VIDEO=<dir>` records a .webm per session.
 
 ## Scenarios (for tests)
 

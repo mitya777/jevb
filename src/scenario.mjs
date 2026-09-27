@@ -11,11 +11,19 @@
 //   refute is an error message shown?           # passes if noul < 0.3
 //   shot out/after-post.png
 //
+// Real phones (AWS Device Farm, or JEVB_APPIUM_URL): `device` / `app` lines
+// pick what the next `open` starts; `open` with no url launches the app.
+//
+//   device pixel 8                  # or: device iphone 15
+//   app build/treechat.apk          # .apk/.ipa, https/s3 url, upload ARN, or bundle id
+//   open                            # launch the app (or `open <url>` for mobile web)
+//
 // Exit code is non-zero if any check fails or any step throws. Consecutive
 // checks are batched into one Jev request (see runScenario).
 import fs from 'node:fs'
 import path from 'node:path'
 import { JevBrowser } from './browser.mjs'
+import { JevDevice } from './device.mjs'
 
 export function parse(text) {
     return text.split('\n').map((raw, i) => ({ raw, line: i + 1 }))
@@ -36,7 +44,10 @@ const toCheck = (s) => ({ question: s.arg, threshold: s.threshold, negate: s.cmd
 // batch:false runs every step on its own, for comparison.
 export async function runScenario(file, { pace, baseUrl, batch = true, onStep = console.log } = {}) {
     const steps = parse(fs.readFileSync(file, 'utf8'))
-    const b = new JevBrowser({ pace, idleMs: 10 * 60_000 })
+    const onDevice = steps.some((s) => ['device', 'app', 'platform'].includes(s.cmd))
+    const b = onDevice ? new JevDevice({ pace, log: (m) => onStep({ log: m }) }) : new JevBrowser({ pace, idleMs: 10 * 60_000 })
+    const deviceOpts = {} // consumed by the next open
+    const target = (arg) => (arg && baseUrl ? new URL(arg, baseUrl).href : arg || undefined)
     const results = []
     let failed = 0
     const started = Date.now()
@@ -70,7 +81,13 @@ export async function runScenario(file, { pace, baseUrl, batch = true, onStep = 
                 }
                 switch (s.cmd) {
                     case 'pace': b.pace = s.arg; out = { pace: s.arg }; break
-                    case 'open': out = await b.open(baseUrl ? new URL(s.arg, baseUrl).href : s.arg); break
+                    case 'device': case 'app': case 'platform': deviceOpts[s.cmd] = s.arg; out = { [s.cmd]: s.arg }; break
+                    case 'open': {
+                        const opts = { ...deviceOpts }
+                        for (const k of Object.keys(deviceOpts)) delete deviceOpts[k]
+                        out = await b.open(target(s.arg), opts)
+                        break
+                    }
                     case 'act': out = await b.act(s.arg, { checks }); break
                     case 'type': {
                         const [intent, text] = s.arg.split(/\s*=>\s*/)

@@ -52,6 +52,49 @@ Use `--session NAME` for parallel contexts and `JEVB_HEADED=1` to watch.
 `JEVB_DEMO=1` draws a visible cursor plus a HUD (step, and what Jev picked
 with its confidence). `JEVB_VIDEO=<dir>` records a .webm per session.
 
+## Real phones (AWS Device Farm)
+
+The same commands drive a real iPhone or Android phone. Jev picks from the
+device's accessibility tree (UiAutomator2 / XCUITest), `check` judges the text
+on screen, and taps, swipes and typing are touch gestures at human or agent
+pace. Mobile web runs in Safari/Chrome on the device, and snapshots use the
+native tree there too, so system alerts, keyboards and permission sheets are
+visible and tappable.
+
+```bash
+jevb devices --platform android                       # what you can open
+jevb open https://app.treechat.com --device "pixel 8"  # Chrome on a real Pixel
+jevb open --device "iphone 15" --app build/Treechat.ipa  # uploads, installs, launches
+jevb act open the new thread composer                  # same session, now a phone
+jevb press Back                                        # Android key; iOS edge swipe
+jevb close                                             # stops the metered session
+```
+
+Devices come from a **metered** (pay-per-minute) remote access session. The phone is
+billed from allocation until the session stops. jevb stops it on `close`,
+`stop`, daemon exit, errors during startup, and after `JEVB_DEVICE_IDLE_MS`
+(default 3 min) with no commands. Getting a device usually takes a minute or
+more.
+
+Setup: AWS credentials in the standard chain (`AWS_PROFILE` or
+`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`) with Device Farm access. The
+project is `JEVB_DF_PROJECT_ARN`, or a project named `jevb` that is created on first use.
+Device Farm is us-west-2 only. `--app` takes a local `.apk`/`.ipa` (uploaded),
+an https/s3 URL, an upload ARN, or an installed bundle id / package name. An
+iOS app must be a device build (`.ipa`), not a simulator build.
+
+In scenarios:
+
+```
+device pixel 8
+app build/treechat.apk
+open                     # launch the app; or `open https://...` for mobile web
+act open the new thread composer
+```
+
+`JEVB_APPIUM_URL=http://127.0.0.1:4723` (plus `JEVB_APPIUM_UDID`) uses a local
+Appium server instead: a simulator, an emulator or a USB phone, at no cost.
+
 ## Scenarios (for tests)
 
 ```

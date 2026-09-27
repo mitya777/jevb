@@ -7,9 +7,10 @@
   "exports": { ".": "./src/index.mjs" },
   "engines": { "node": ">=22" },
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test"
   },
   "dependencies": {
+    "@aws-sdk/client-device-farm": "^3.1141.0",
     "playwright-core": "1.57.0"
   }
 }

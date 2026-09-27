@@ -13,6 +13,11 @@ const HERE = path.dirname(fileURLToPath(import.meta.url))
 const USAGE = `jevb <command> [args] [--pace human|agent] [--session NAME]
 
   open <url>                       navigate (starts daemon + chromium on demand)
+  open [url] --device NAME [--app FILE|URL|ARN|BUNDLE_ID] [--platform ios|android]
+                                   real phone on AWS Device Farm (metered per
+                                   minute): an app, or Safari/Chrome at <url>.
+                                   Later commands on that --session drive it.
+  devices [--platform ios|android] Device Farm phones you can open
   act <intent...>                  Jev picks the element, then click it
   type <intent...> -- <text...>    Jev picks the field, then type text [--enter]
   press <key>                      e.g. Enter, Escape, Meta+K
@@ -33,7 +38,10 @@ const USAGE = `jevb <command> [args] [--pace human|agent] [--session NAME]
 Pace: human (default) = curved mouse, hover dwell, per-key typing, reading
 pauses. agent = as fast as possible. Env: TYPESAFEAI_API_KEY (or ./.env),
 JEVB_PACE, JEVB_PORT, JEVB_IDLE_MS (chromium), JEVB_DAEMON_IDLE_MS, JEVB_HEADED=1,
-JEVB_DEMO=1 (visible cursor + Jev HUD), JEVB_VIDEO=<dir> (record .webm).`
+JEVB_DEMO=1 (visible cursor + Jev HUD), JEVB_VIDEO=<dir> (record .webm).
+Devices: AWS credentials (AWS_PROFILE etc.), JEVB_DF_PROJECT_ARN (default:
+project "jevb"), JEVB_DEVICE_IDLE_MS (release an idle phone, default 3 min),
+JEVB_APPIUM_URL (use a local Appium instead of Device Farm).`
 
 function parseArgs(argv) {
     const flags = {}, pos = []
@@ -97,7 +105,8 @@ async function main() {
     const text = pos.join(' ')
     const args = {
         status: {}, snap: common, close: common,
-        open: { ...common, url: pos[0] },
+        open: { ...common, url: pos[0], device: flags.device, app: flags.app, platform: flags.platform },
+        devices: { platform: flags.platform },
         act: { ...common, intent: text },
         type: { ...common, intent: text, text: (rest || []).join(' '), submit: !!flags.enter },
         press: { ...common, key: pos[0] },

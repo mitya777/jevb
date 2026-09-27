@@ -42,6 +42,7 @@ jevb check is a sign-up form shown?
 jevb refute is an error page shown?
 jevb checks --check 'is this a login page?' --refute 'is an error shown?'   # 1 Jev request
 jevb act open the composer --check 'is the feed loaded?'   # checks run in parallel with the pick
+jevb scroll end          # or top / 800 / -800; follows in-app scroll panels
 jevb snap                 # what Jev chooses from
 jevb shot out.png --full
 jevb stop
@@ -83,13 +84,33 @@ Treechat signup, the page text in the state dropped the pick's confidence
 from 0.94 to about 0.5 for the same intent. `--no-batch` runs every step on its own
 for comparison. Batched and standalone nouls matched within 0.01 on the demo.
 
-Checks see `visible_text`, `url`, `title`, and `fields`: form values, which
-`innerText` leaves out. Passwords show only as `(filled)`/`(empty)`.
+Checks judge **what the user sees now**:
+- `viewport_text`: the text on screen. When a popup is open (`modal_open`),
+  it's only the popup's text.
+- `fields`: form values, which `innerText` leaves out. Passwords show only as
+  `(filled)`/`(empty)`.
+
+There's no whole-page text. Offscreen or covered text made judgments worse
+(footer-visible dropped from 0.75 to 0.58), and it let "is a thread shown?"
+pass at 0.92 behind a sign-up popup. Jev reads text, not layout, so name
+what's on screen: "is a feed shown?" scores ~0.6, "does the page show a Public
+stream with Now, Hot and Top tabs?" ~0.8.
+
+Element picks skip anything covered at its center (for example by a popup).
+They also include plain `<div>`s with a pointer cursor, which is how React
+apps usually build clickable rows and pills.
+
+`act` waits for navigations that start shortly after the click (e.g. after
+an analytics call). It then waits for the new page to commit, load, and for
+its text to stop changing, so checks never judge a blank page.
 
 Library use: `import { JevBrowser, runScenario } from 'jev-browser'`.
 
 ## Cost / speed (measured 2026-09-26)
 
+- `examples/tour-treechat.jevb`: landing → scroll end/top → Explore →
+  Hot/Now → Reply (sign-up popup) → close → Channels → Home. 16 checks and
+  7 actions, 0 failures; 17–18s at agent pace, ~48s at human pace.
 - `examples/demo-treechat.jevb` (10 checks, 3 actions, agent pace):
   batched 2.2–3.1s with 7 Jev requests; `--no-batch` 4.0–4.2s with 13.
 

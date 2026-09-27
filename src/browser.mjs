@@ -128,7 +128,7 @@ export class JevBrowser {
                 { target: { type: 'choice', instructions: 'Which page element should a user interact with to accomplish `intent`?', criteria } })
         })()
         const checksReq = checks.length && (async () => ask(await pageState(page), Object.fromEntries(checks.map((c, i) => [
-            `check_${i}`, { type: 'noul', instructions: `Looking at the current page (\`visible_text\`, \`fields\`, \`url\`, \`title\`): ${c.question}` },
+            `check_${i}`, { type: 'noul', instructions: `The user currently sees \`viewport_text\` (only the modal, when \`modal_open\` is true) and form \`fields\`. Judge what the user sees now: ${c.question}` },
         ]))))()
         const t = Date.now()
         const [choiceRes, checksRes] = await Promise.all([choiceReq || null, checksReq || null])
@@ -173,8 +173,26 @@ export class JevBrowser {
     async act(intent, { session, pace: p, checks } = {}) {
         const pc = pace.resolvePace(p || this.pace)
         const { page, locator, target, checks: checkResults } = await this.find(intent, { session, checks })
+        // Some clicks navigate a beat later (after an analytics call, say).
+        // Watch for a main-frame navigation request briefly and wait it out.
+        // A navigation *request* comes before the new document commits, and
+        // load-state waits in between resolve against the old document, so
+        // wait for the main frame to actually navigate before settling.
+        let onRequest
+        const navigated = new Promise((resolve) => {
+            onRequest = (req) => req.isNavigationRequest() && req.frame() === page.mainFrame() && resolve(true)
+            page.on('request', onRequest)
+            setTimeout(() => resolve(false), 1_200)
+        })
+        const committed = page.waitForEvent('framenavigated', { predicate: (f) => f === page.mainFrame(), timeout: 15_000 }).catch(() => null)
         await pace.click(page, locator, pc)
         await pace.settle(page, pc)
+        if (await navigated) {
+            await committed
+            await page.waitForLoadState('load', { timeout: 15_000 }).catch(() => {})
+            await pace.settle(page, pc)
+        }
+        page.off('request', onRequest)
         return { clicked: target, url: page.url(), checks: checkResults }
     }
 
@@ -194,8 +212,9 @@ export class JevBrowser {
 
     async scroll(dy = 600, { session, pace: p } = {}) {
         const page = await this.page(session)
-        await pace.scroll(page, Number(dy), pace.resolvePace(p || this.pace))
-        return { scrolled: Number(dy) }
+        const to = ['end', 'bottom', 'top'].includes(dy) ? dy : Number(dy)
+        await pace.scroll(page, to, pace.resolvePace(p || this.pace))
+        return { scrolled: to }
     }
 
     // Test assertions: Jev nouls over the visible page, all in one request.

@@ -80,6 +80,20 @@ export async function press(page, key, pace) {
     await page.keyboard.press(key)
 }
 
+// SPAs render after load/networkidle. Wait until there is text and it has
+// stopped changing for two polls (capped), so checks don't judge a blank page.
+async function rendered(page, { maxMs = 4_000, pollMs = 150 } = {}) {
+    const started = Date.now()
+    let last = -1, stable = 0
+    while (Date.now() - started < maxMs) {
+        const len = await page.evaluate(() => document.body?.innerText.length || 0).catch(() => 0)
+        stable = len > 0 && len === last ? stable + 1 : 0
+        if (stable >= 2) return
+        last = len
+        await sleep(pollMs)
+    }
+}
+
 // After navigation or a click that changes the page, a person reads before
 // acting. Scale with visible text, capped so tests stay bounded.
 export async function settle(page, pace) {
@@ -87,17 +101,75 @@ export async function settle(page, pace) {
     // Both paces wait for the page itself (SPAs render after DOMContentLoaded);
     // only human adds a reading pause on top.
     await page.waitForLoadState('networkidle', { timeout: pace === 'agent' ? 3_000 : 5_000 }).catch(() => {})
+    await rendered(page)
     if (pace === 'agent') return
     const chars = await page.evaluate(() => document.body?.innerText.length || 0).catch(() => 0)
     await sleep(Math.min(2500, 400 + chars / 8))
 }
 
-export async function scroll(page, dy, pace) {
-    if (pace === 'agent') return page.mouse.wheel(0, dy)
-    const ticks = Math.max(1, Math.round(Math.abs(dy) / 120))
-    for (let i = 0; i < ticks; i++) {
-        await page.mouse.wheel(0, Math.sign(dy) * rand(90, 150))
-        await sleep(rand(30, 90))
+// The element that actually scrolls: the tallest overflow container if the
+// app scrolls inside a panel (Treechat's feed does), else the document.
+async function scrollTarget(page) {
+    return page.evaluate(() => {
+        const doc = document.scrollingElement
+        let best = null
+        for (const el of document.querySelectorAll('body *')) {
+            if (el.scrollHeight <= el.clientHeight + 50 || el.clientHeight < innerHeight * 0.4) continue
+            const oy = getComputedStyle(el).overflowY
+            if (oy !== 'auto' && oy !== 'scroll') continue
+            if (!best || el.scrollHeight > best.scrollHeight) best = el
+        }
+        if (!best || (doc.scrollHeight > doc.clientHeight + 50 && doc.scrollHeight >= best.scrollHeight)) {
+            return { doc: true, x: innerWidth / 2, y: innerHeight / 2 }
+        }
+        best.setAttribute('data-jevb-scroller', '1')
+        const r = best.getBoundingClientRect()
+        return { doc: false, x: r.left + r.width / 2, y: r.top + Math.min(r.height, innerHeight) / 2 }
+    })
+}
+
+const scrollPos = (page, doc) => page.evaluate((doc) => {
+    const el = doc ? document.scrollingElement : document.querySelector('[data-jevb-scroller]')
+    return { top: el.scrollTop, max: el.scrollHeight - el.clientHeight }
+}, doc)
+
+// dy: pixels (negative = up), or 'end' / 'top'. 'end' on an infinite feed
+// stops after maxMs.
+export async function scroll(page, dy, pace, { maxMs = 20_000 } = {}) {
+    const target = await scrollTarget(page)
+    const to = dy === 'end' || dy === 'bottom' ? 'end' : dy === 'top' ? 'top' : null
+    if (pace === 'agent') {
+        if (!to) return page.mouse.wheel(0, Number(dy)).then(() => page.mouse.move(target.x, target.y))
+        return page.evaluate(({ doc, to }) => {
+            const el = doc ? document.scrollingElement : document.querySelector('[data-jevb-scroller]')
+            el.scrollTo({ top: to === 'end' ? el.scrollHeight : 0, behavior: 'instant' }) // beat CSS scroll-behavior:smooth
+        }, { doc: target.doc, to })
     }
-    await sleep(rand(200, 500))
+    await humanMove(page, target.x + rand(-60, 60), target.y + rand(-40, 40))
+    if (!to) {
+        const ticks = Math.max(1, Math.round(Math.abs(dy) / 120))
+        for (let i = 0; i < ticks; i++) {
+            await page.mouse.wheel(0, Math.sign(dy) * rand(90, 150))
+            await sleep(rand(30, 90))
+        }
+        return sleep(rand(200, 500))
+    }
+    // Flick-and-read until the position stops moving (or maxMs on infinite feeds).
+    const dir = to === 'end' ? 1 : -1
+    const started = Date.now()
+    let last = -1, still = 0
+    while (Date.now() - started < maxMs) {
+        const burst = Math.round(rand(3, 6))
+        for (let i = 0; i < burst; i++) {
+            await page.mouse.wheel(0, dir * rand(160, 260))
+            await sleep(rand(25, 60))
+        }
+        await sleep(rand(250, 650)) // glance at what scrolled in
+        const { top, max } = await scrollPos(page, target.doc)
+        if ((dir > 0 && top >= max - 2) || (dir < 0 && top <= 0)) break
+        still = Math.abs(top - last) < 2 ? still + 1 : 0
+        if (still >= 2) break
+        last = top
+    }
+    await sleep(rand(300, 600))
 }

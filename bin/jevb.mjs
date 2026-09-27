@@ -16,7 +16,7 @@ const USAGE = `jevb <command> [args] [--pace human|agent] [--session NAME]
   act <intent...>                  Jev picks the element, then click it
   type <intent...> -- <text...>    Jev picks the field, then type text [--enter]
   press <key>                      e.g. Enter, Escape, Meta+K
-  scroll [dy]                      default 600
+  scroll [dy|end|top]              default 600; end/top follow in-app scroll panels
   check <question...>              Jev noul over the page; exit 1 if < --threshold (0.7)
   refute <question...>             inverse check; exit 1 if >= --threshold (0.3)
   checks --check Q --refute Q ...  many checks in ONE Jev request; exit 1 if any fail

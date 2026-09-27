@@ -1,0 +1,29 @@
+# Tour: land on treechat.com, scroll to the end and back, Explore, then use
+# the public stream. Read-only: logged out, never posts or upvalues.
+# Checks name text that is on screen: Jev reads the visible text, not the
+# layout, so "is a feed shown?" scores ~0.6 while naming the tabs scores ~0.8.
+open https://treechat.com/
+check is a "Start Earning" call to action visible?
+refute is an error shown?
+scroll end
+check is a copyright notice visible?
+scroll top
+refute is a copyright notice visible?
+act click Explore in the top navigation
+check does the page show a Public stream with Now, Hot and Top tabs?
+refute is the page blank or still loading?
+refute is an error or "not found" page shown?
+scroll 1800
+scroll -1800
+act switch the feed to Hot
+act switch the feed back to Now
+act click the first visible Reply button
+check is a sign-up form shown?
+refute is a conversation thread shown?
+act close the dialog
+refute is a sign-up form shown?
+act open the Channels page from the sidebar
+check is a list of channels shown?
+act go to Home in the sidebar
+check does the page show a Public stream with Now, Hot and Top tabs?
+refute is the page blank or still loading?

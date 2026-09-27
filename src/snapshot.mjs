@@ -10,6 +10,9 @@ function collect() {
         '[role=checkbox]', '[role=switch]', '[role=textbox]', '[role=combobox]',
         '[contenteditable=""]', '[contenteditable=true]', '[onclick]', '[tabindex]:not([tabindex="-1"])',
     ].join(',')
+    // Real controls: SELECTOR minus generic focus/onclick containers, which
+    // apps put around whole panels (Treechat's panel root is tabindex=0).
+    const CONTROL = SELECTOR.split(',').filter((x) => !x.startsWith('[tabindex') && x !== '[onclick]').join(',')
     const clean = (s) => (s || '').replace(/\s+/g, ' ').trim()
     // Form fields labelled by a sibling <div>/<span> instead of <label for>.
     const nearbyLabel = (el) => {
@@ -25,8 +28,27 @@ function collect() {
     }
     const vw = innerWidth, vh = innerHeight
     const out = []
+    // Ids are per snapshot: clear stale ones so a covered element can't keep
+    // an id that gets reassigned to something else.
+    for (const el of document.querySelectorAll('[data-jevb]')) el.removeAttribute('data-jevb')
     let n = 0
-    for (const el of document.querySelectorAll(SELECTOR)) {
+    // React apps attach onClick to plain <div>s, invisible to SELECTOR. From
+    // each innermost cursor:pointer element, climb while the parent is also
+    // pointer and shows the same text: that's one clickable item ("Channels"
+    // row, "Hot" pill), not the whole pointer-styled toolbar around it.
+    const pointer = (el) => el && getComputedStyle(el).cursor === 'pointer'
+    const text = (el) => clean(el.innerText)
+    const candidates = new Set(document.querySelectorAll(SELECTOR))
+    for (const leaf of document.querySelectorAll('body *')) {
+        if (!pointer(leaf) || [...leaf.children].some(pointer)) continue
+        if (leaf.closest(CONTROL)) continue // inside a real control already listed
+        let el = leaf
+        while (pointer(el.parentElement) && text(el.parentElement) === text(el) && !el.parentElement.matches(CONTROL)) el = el.parentElement
+        if (!text(el) && !el.querySelector('svg,img')) continue
+        if ([...el.querySelectorAll(CONTROL)].some((c) => text(c) === text(el))) continue
+        candidates.add(el)
+    }
+    for (const el of candidates) {
         const r = el.getBoundingClientRect()
         if (r.width < 2 || r.height < 2) continue
         const cs = getComputedStyle(el)
@@ -35,9 +57,10 @@ function collect() {
         // Skip wrappers whose only job is to contain an already-listed control.
         if (el.matches('[tabindex]') && !el.matches('a,button,input,textarea,select,[role],[contenteditable]')
             && el.querySelector(SELECTOR)) continue
-        const id = el.getAttribute('data-jevb') || `e${++n}`
+        const id = `e${++n}`
         el.setAttribute('data-jevb', id)
-        const role = el.getAttribute('role') || (el.isContentEditable ? 'editor' : el.tagName.toLowerCase())
+        const role = el.getAttribute('role') || (el.isContentEditable ? 'editor'
+            : el.matches(SELECTOR) ? el.tagName.toLowerCase() : 'clickable')
         const label = clean(
             el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('placeholder')
             || el.getAttribute('alt') || el.labels?.[0]?.innerText || nearbyLabel(el) || el.innerText || el.value
@@ -45,6 +68,12 @@ function collect() {
             || [...el.querySelectorAll('img[alt],svg title')].map((x) => x.getAttribute('alt') || x.textContent).join(' '),
         ).slice(0, 100)
         const inView = r.bottom > 0 && r.right > 0 && r.top < vh && r.left < vw
+        // Covered by something else (a modal, a sticky bar): not clickable now.
+        if (inView) {
+            const cx = Math.min(Math.max(r.left + r.width / 2, 0), vw - 1), cy = Math.min(Math.max(r.top + r.height / 2, 0), vh - 1)
+            const hit = document.elementFromPoint(cx, cy)
+            if (hit && !el.contains(hit) && !hit.contains(el)) continue
+        }
         const extra = [
             el.type && el.tagName === 'INPUT' ? `type=${el.type}` : '',
             el.getAttribute('href') ? `href=${el.getAttribute('href').slice(0, 60)}` : '',
@@ -72,14 +101,54 @@ export function shortlist(elements, intent) {
     return [...elements].sort((a, b) => score(b) - score(a)).slice(0, MAX_OPTIONS)
 }
 
-// What checks see. innerText omits form values, so typed input is listed
-// separately; password values are reduced to filled/empty.
-export async function pageState(page, { maxText = 8000 } = {}) {
+// What checks see. `viewport_text` is what's on screen right now; with a
+// modal open it is only the modal's text (the page behind is not "shown").
+// Deliberately no whole-page text: offscreen/covered content in the state
+// pulled judgments off (footer-visible 0.75 → 0.58 at page bottom).
+// innerText omits form values, so typed input is listed in `fields`;
+// password values are reduced to filled/empty.
+export async function pageState(page, { maxText = 6000 } = {}) {
     return page.evaluate((maxText) => {
+        const clean = (t) => t.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim()
+        const vw = innerWidth, vh = innerHeight
+        const shown = (el) => {
+            const r = el.getBoundingClientRect(), cs = getComputedStyle(el)
+            return r.width > 1 && r.height > 1 && cs.visibility !== 'hidden' && cs.display !== 'none'
+        }
+        // A modal: explicit dialog semantics, or whatever sits on top at the
+        // viewport center inside a fixed layer covering most of the screen.
+        let modal = [...document.querySelectorAll('[role=dialog],[role=alertdialog],[aria-modal=true],dialog[open]')].find(shown) || null
+        if (!modal) {
+            for (let n = document.elementFromPoint(vw / 2, vh / 2); n && n !== document.body; n = n.parentElement) {
+                const cs = getComputedStyle(n), r = n.getBoundingClientRect()
+                if (cs.position === 'fixed' && r.width * r.height > vw * vh * 0.5) { modal = n; break }
+            }
+            // The full-screen fixed layer may be the backdrop; prefer the panel in it.
+            if (modal && modal.children.length) {
+                const panel = [...modal.querySelectorAll('*')].find((c) => {
+                    const r = c.getBoundingClientRect()
+                    return c.innerText?.trim() && r.width < vw * 0.95 && r.width * r.height > vw * vh * 0.1
+                })
+                if (panel) modal = panel
+            }
+            if (modal && modal.contains(document.querySelector('main, [role=main]')) ) modal = null // app shell, not a modal
+        }
+        const root = modal || document.body
+        let viewport = ''
+        const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+        const range = document.createRange()
+        for (let t = walker.nextNode(); t && viewport.length < maxText; t = walker.nextNode()) {
+            if (!t.textContent.trim()) continue
+            range.selectNodeContents(t)
+            const r = range.getBoundingClientRect()
+            if (r.bottom < 0 || r.top > vh || r.right < 0 || r.left > vw || r.width === 0) continue
+            const cs = t.parentElement && getComputedStyle(t.parentElement)
+            if (cs && (cs.visibility === 'hidden' || Number(cs.opacity) === 0)) continue
+            viewport += t.textContent.trim() + (getComputedStyle(t.parentElement).display === 'inline' ? ' ' : '\n')
+        }
         const fields = []
-        for (const el of document.querySelectorAll('input:not([type=hidden]),textarea,select,[contenteditable=""],[contenteditable=true]')) {
-            const r = el.getBoundingClientRect()
-            if (r.width < 2 || r.height < 2) continue
+        for (const el of root.querySelectorAll('input:not([type=hidden]),textarea,select,[contenteditable=""],[contenteditable=true]')) {
+            if (!shown(el)) continue
             const name = (el.labels?.[0]?.innerText || el.getAttribute('aria-label') || el.getAttribute('placeholder')
                 || el.getAttribute('name') || el.type || 'field').trim().slice(0, 60)
             let value = el.isContentEditable ? el.innerText : el.type === 'checkbox' || el.type === 'radio' ? String(el.checked) : el.value
@@ -89,7 +158,8 @@ export async function pageState(page, { maxText = 8000 } = {}) {
         return {
             url: location.href,
             title: document.title,
-            visible_text: (document.body?.innerText || '').replace(/\n{3,}/g, '\n\n').slice(0, maxText),
+            modal_open: !!modal,
+            viewport_text: clean(viewport).slice(0, maxText),
             fields,
         }
     }, maxText)

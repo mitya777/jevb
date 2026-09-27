@@ -31,7 +31,8 @@ const USAGE = `jevb <command> [args] [--pace human|agent] [--session NAME]
   pace [human|agent]               get/set the daemon default pace
   close                            close session (last one closes chromium)
   status | stop | serve
-  run <scenario.jevb> [--base URL] run a scenario file in-process (for tests);
+  run <scenario.jevb> [--base URL] [--device NAME --app FILE]
+                                   run a scenario file in-process (for tests);
                                    consecutive checks batch into one Jev call
                                    (--no-batch to compare)
 
@@ -90,7 +91,7 @@ async function main() {
     if (cmd === 'serve') return (await import('../src/daemon.mjs')).serve()
     if (cmd === 'run') {
         const { runScenario } = await import('../src/scenario.mjs')
-        const { failed, videos, totalMs, jevCalls } = await runScenario(pos[0], { pace: flags.pace, baseUrl: flags.base, batch: !flags['no-batch'], onStep: (r) => console.log(JSON.stringify(r)) })
+        const { failed, videos, totalMs, jevCalls } = await runScenario(pos[0], { pace: flags.pace, baseUrl: flags.base, batch: !flags['no-batch'], device: flags.device, app: flags.app, onStep: (r) => console.log(JSON.stringify(r)) })
         console.log(JSON.stringify({ done: true, failed, totalMs, jevCalls, videos }))
         process.exitCode = failed ? 1 : 0
         return

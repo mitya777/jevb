@@ -20,7 +20,8 @@ export async function judge({ intent, checks = [], options, state, where }) {
         return ask({ intent, page: await where() },
             { target: { type: 'choice', instructions: 'Which page element should a user interact with to accomplish `intent`?', criteria } })
     })()
-    const checksReq = checks.length && (async () => ask(await state(), Object.fromEntries(checks.map((c, i) => [
+    let seen
+    const checksReq = checks.length && (async () => ask(seen = await state(), Object.fromEntries(checks.map((c, i) => [
         `check_${i}`, { type: 'noul', instructions: `The user currently sees \`viewport_text\` (only the modal, when \`modal_open\` is true) and form \`fields\`. Judge what the user sees now: ${c.question}` },
     ]))))()
     const t = Date.now()
@@ -34,7 +35,10 @@ export async function judge({ intent, checks = [], options, state, where }) {
         const negate = !!c.negate
         const threshold = Number(c.threshold ?? (negate ? 0.3 : 0.7))
         const noul = answers[`check_${i}`].noul
-        return { question: c.question, noul, threshold, negate, pass: negate ? noul < threshold : noul >= threshold, jevMs, batch, requests }
+        const pass = negate ? noul < threshold : noul >= threshold
+        // A failed check shows the form fields Jev judged, to tell a wrong
+        // screen from a wrong judgment.
+        return { question: c.question, noul, threshold, negate, pass, jevMs, batch, requests, ...(!pass && seen?.fields?.length && { fields: seen.fields }) }
     })
     let target = null
     if (intent) {

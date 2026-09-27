@@ -92,6 +92,24 @@ open                     # launch the app; or `open https://...` for mobile web
 act open the new thread composer
 ```
 
+Or keep the scenario device-free and choose the phone per run:
+`jevb run examples/demo-treechat-app.jevb --device "iphone 14" --app treechat.ipa`.
+
+Things specific to phones:
+- iOS system alerts, such as permission prompts, aren't in the app's tree on Device Farm.
+  jevb reads them through the alert API. While one is up, it is the only thing on screen,
+  and its buttons can be tapped (`act? dismiss the notifications prompt`).
+  `act?` skips instead of failing when nothing matches.
+- `press HideKeyboard` closes the keyboard (on iOS web views, it taps the ✓ Done
+  toolbar button). `press Back` on Android closes the keyboard first when one is
+  up, like the real button. iOS Back is an edge swipe, which many apps ignore.
+- Unlabeled web inputs, such as a WebView sign-up form, take the text just above them
+  as their label. Values are exact: Android sets the field value rather than sending
+  keys through the IME, which would autocapitalize.
+- A failed check lists the form `fields` Jev judged.
+- Device Farm records every session. The MP4 is under the session's artifacts once it
+  finishes stopping (`aws devicefarm list-artifacts --arn <session> --type FILE`).
+
 `JEVB_APPIUM_URL=http://127.0.0.1:4723` (plus `JEVB_APPIUM_UDID`) uses a local
 Appium server instead: a simulator, an emulator or a USB phone, at no cost.
 

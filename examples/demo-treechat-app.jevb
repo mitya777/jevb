@@ -1,0 +1,22 @@
+# Demo: the Treechat app on a real phone (AWS Device Farm, metered). Same
+# read-only walk as demo-treechat.jevb: types a username into sign-up but
+# never submits.
+#   jevb run examples/demo-treechat-app.jevb --device "pixel 9" --app treechat.apk
+#   jevb run examples/demo-treechat-app.jevb --device "iphone 14" --app treechat.ipa
+pace human
+open
+act? dismiss the notifications permission prompt without allowing
+check is this a login page?
+check is there a password field?
+refute is the user already logged in?
+act go to create a new account
+check is a sign-up form with Username and Email fields shown?   # iOS: the keyboard covers the rest
+refute is an error or "not found" page shown?
+type the username field => jevb demo
+check does the username field contain "jevb demo"?
+refute is the password field filled in?
+press HideKeyboard       # it covers the sign-up form's Login link
+scroll end
+act tap Login to go back to the login page
+check is a login form with Email and Password fields shown?
+refute is an error or "not found" page shown?

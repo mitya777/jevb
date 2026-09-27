@@ -17,6 +17,10 @@
 //   device pixel 8                  # or: device iphone 15
 //   app build/treechat.apk          # .apk/.ipa, https/s3 url, upload ARN, or bundle id
 //   open                            # launch the app (or `open <url>` for mobile web)
+//   act? dismiss the notifications prompt   # `act?`: no match is skipped, not a failure
+//
+// `runScenario(file, { device, app })` (CLI: --device/--app) presets them,
+// so one scenario runs on any phone.
 //
 // Exit code is non-zero if any check fails or any step throws. Consecutive
 // checks are batched into one Jev request (see runScenario).
@@ -30,8 +34,8 @@ export function parse(text) {
         .map((s) => ({ ...s, src: s.raw.replace(/\s+#.*$/, '').trim() }))
         .filter((s) => s.src && !s.src.startsWith('#'))
         .map((s) => {
-            const m = s.src.match(/^(\w+)(?:@([\d.]+))?\s*(.*)$/)
-            return { ...s, cmd: m[1], threshold: m[2] ? Number(m[2]) : undefined, arg: m[3] }
+            const m = s.src.match(/^(\w+)(\?)?(?:@([\d.]+))?\s*(.*)$/)
+            return { ...s, cmd: m[1], optional: !!m[2], threshold: m[3] ? Number(m[3]) : undefined, arg: m[4] }
         })
 }
 
@@ -42,11 +46,11 @@ const toCheck = (s) => ({ question: s.arg, threshold: s.threshold, negate: s.cmd
 // act/type they join that step's element-choice request too (same page
 // state, and checks describe the page before the action either way).
 // batch:false runs every step on its own, for comparison.
-export async function runScenario(file, { pace, baseUrl, batch = true, onStep = console.log } = {}) {
+export async function runScenario(file, { pace, baseUrl, batch = true, onStep = console.log, device, app } = {}) {
     const steps = parse(fs.readFileSync(file, 'utf8'))
-    const onDevice = steps.some((s) => ['device', 'app', 'platform'].includes(s.cmd))
+    const onDevice = !!(device || app) || steps.some((s) => ['device', 'app', 'platform'].includes(s.cmd))
     const b = onDevice ? new JevDevice({ pace, log: (m) => onStep({ log: m }) }) : new JevBrowser({ pace, idleMs: 10 * 60_000 })
-    const deviceOpts = {} // consumed by the next open
+    const deviceOpts = { ...(device && { device }), ...(app && { app }) } // consumed by the next open
     const target = (arg) => (arg && baseUrl ? new URL(arg, baseUrl).href : arg || undefined)
     const results = []
     let failed = 0
@@ -101,8 +105,11 @@ export async function runScenario(file, { pace, baseUrl, batch = true, onStep = 
                     default: throw new Error(`unknown step "${s.cmd}"`)
                 }
             } catch (e) {
-                failed++
-                out = { error: e.message, detail: e.detail, checks: e.checks }
+                if (s.optional && e.code === 'NO_MATCH') out = { skipped: 'no match', checks: e.checks }
+                else {
+                    failed++
+                    out = { error: e.message, detail: e.detail, checks: e.checks }
+                }
             }
             if (s.cmd !== 'wait') lastWorkEnd = Date.now()
             const { checks: checkResults, ...rest } = out

@@ -104,11 +104,17 @@ export class JevDevice {
 
         const wd = new WebDriver(remote?.endpoint || local)
         const t = Date.now()
-        try {
-            await wd.newSession(caps)
-        } catch (e) {
-            await remote?.stop()
-            throw e
+        // WebDriverAgent sometimes fails to come up on a real iPhone; the
+        // device is already allocated (and billed), so retry once on it.
+        for (let attempt = 1; ; attempt++) {
+            try {
+                await wd.newSession(caps)
+                break
+            } catch (e) {
+                if (attempt < 2 && e.code === 'WEBDRIVER') { this.log(`appium session failed (${e.message.slice(0, 120)}), retrying`); continue }
+                await remote?.stop()
+                throw e
+            }
         }
         this.log(`appium session up in ${Date.now() - t}ms`)
         const s = { wd, platform, remote, web, webContext: null, device: remote?.device.name || device || platform, screen: null }
@@ -125,23 +131,42 @@ export class JevDevice {
     // ---- screen reading --------------------------------------------------
 
     async read(s) {
-        return deviceSnapshot(await s.wd.source(), s.screen)
+        const snap = deviceSnapshot(await s.wd.source(), s.screen)
+        if (s.platform !== 'ios' || snap.state.modal_open) return snap
+        // iOS system alerts (permission prompts) belong to SpringBoard and
+        // are missing from the app's source on Device Farm; the alert API
+        // still sees them. While one is up it is the only thing on screen.
+        const text = await s.wd.req('GET', s.wd.s('/alert/text')).catch(() => null)
+        if (text == null) return snap
+        const buttons = await s.wd.execute('mobile: alert', [{ action: 'getButtons' }]).catch(() => [])
+        return {
+            ...snap,
+            elements: buttons.map((b, i) => ({ id: `a${i + 1}`, role: 'button', label: b, alertButton: b, desc: `button "${b}" in system alert` })),
+            state: { viewport_text: text, fields: [], modal_open: true, keyboard_open: false },
+        }
     }
 
     // Wait for the UI to stop changing (two identical sources), capped. Human
     // pace adds a reading pause scaled by the text on screen.
+    // What the screen offers, for "has it stopped changing": the tappable
+    // elements and where they are. Raw source is too noisy (an app's live
+    // debug overlay or ticking counters would never settle).
+    async layout(s) {
+        const snap = deviceSnapshot(await s.wd.source(), s.screen)
+        return { snap, key: snap.elements.map((e) => e.desc).join('\n') }
+    }
+
     async settle(s, pc, { maxMs = 4_000 } = {}) {
         const started = Date.now()
-        let last = null, snap
+        let last = null, cur
         while (Date.now() - started < maxMs) {
-            const src = await s.wd.source()
-            if (src === last) { snap = deviceSnapshot(src, s.screen); break }
-            last = src
+            cur = await this.layout(s)
+            if (cur.key === last) break
+            last = cur.key
             await sleep(250)
         }
         if (pc === 'agent') return
-        snap ||= deviceSnapshot(last, s.screen)
-        await sleep(Math.min(2500, 400 + snap.state.viewport_text.length / 8))
+        await sleep(Math.min(2500, 400 + cur.snap.state.viewport_text.length / 8))
     }
 
     async judge(s, { intent, checks = [] }) {
@@ -169,6 +194,10 @@ export class JevDevice {
     // ---- gestures --------------------------------------------------------
 
     async tap(s, el, pc) {
+        if (el.alertButton) {
+            if (pc === 'human') await sleep(rand(250, 700))
+            return s.wd.execute('mobile: alert', [{ action: 'accept', buttonLabel: el.alertButton }])
+        }
         let { x, y } = el
         if (pc === 'human') {
             // A thumb lands near the middle, not on the exact center pixel.
@@ -185,13 +214,6 @@ export class JevDevice {
                 { type: 'pause', duration: pc === 'human' ? Math.round(rand(60, 140)) : 40 },
                 { type: 'pointerUp', button: 0 },
             ],
-        }])
-    }
-
-    async keys(s, text) {
-        await s.wd.actions([{
-            type: 'key', id: 'keyboard',
-            actions: [...text].flatMap((value) => [{ type: 'keyDown', value }, { type: 'keyUp', value }]),
         }])
     }
 
@@ -240,13 +262,13 @@ export class JevDevice {
         const { s, el, target, checks: checkResults } = await this.find(intent, { session, checks })
         await this.tap(s, el, pc)
         await sleep(pc === 'human' ? rand(300, 600) : 300) // keyboard comes up
-        // iOS appends each element send. UiAutomator2 replaces the field's text
-        // on each send, so Android types with key events, which insert at the cursor like a
-        // keyboard. Chunks of 1–3 chars with jitter at human pace.
-        const field = s.platform === 'ios' ? await s.wd.activeElement() : null
-        // A tap puts the Android cursor where it lands; type at the end.
-        if (!field) await s.wd.execute('mobile: pressKey', [{ keycode: 123 }]) // KEYCODE_MOVE_END
-        const send = (chunk) => (field ? s.wd.sendKeysTo(field, chunk) : this.keys(s, chunk))
+        // iOS appends each element send. UiAutomator2 replaces the whole value
+        // (and key events go through the IME, which autocapitalizes), so
+        // Android sets prefix + typed-so-far: exact text, still appending.
+        const field = await s.wd.activeElement()
+        const prefix = s.platform === 'ios' ? '' : el.value || ''
+        let typed = ''
+        const send = (chunk) => { typed += chunk; return s.wd.sendKeysTo(field, s.platform === 'ios' ? chunk : prefix + typed) }
         if (pc === 'agent') await send(text)
         else {
             for (let i = 0; i < text.length;) {
@@ -256,17 +278,30 @@ export class JevDevice {
                 await sleep(rand(60, 180))
             }
         }
+        // The field's reported value lags the last send; settle so a check
+        // right after sees it.
         if (submit) await this.press('Enter', { session, pace: pc })
+        else await this.settle(s, pc)
         return { typed: target, chars: text.length, checks: checkResults }
     }
 
-    // Enter, Back, Home (plus Tab/Escape/Backspace on Android). iOS has no
-    // back button: Back is the left-edge swipe.
+    // Enter, Back, Home, HideKeyboard (plus Tab/Escape/Backspace on Android).
+    // iOS has no back button: Back is the left-edge swipe.
     async press(key, { session, pace: p } = {}) {
         const pc = pace.resolvePace(p || this.pace)
         const s = this.session(session)
         if (pc === 'human') await sleep(rand(120, 350))
-        if (s.platform === 'android') {
+        if (key === 'HideKeyboard') {
+            const shown = () => s.wd.req('GET', s.wd.s('/appium/device/is_keyboard_shown'))
+            if (await shown()) {
+                // iOS web keyboards close from the ✓ ("Done") in the toolbar
+                // above them, which iOS 27 reports as visible="false".
+                const done = s.platform === 'ios' && await s.wd.req('POST', s.wd.s('/element'), { using: 'accessibility id', value: 'Done' }).catch(() => null)
+                if (done) await s.wd.req('POST', s.wd.s(`/element/${Object.values(done)[0]}/click`), {})
+                else await s.wd.execute('mobile: hideKeyboard', [{}]).catch(() => {})
+                if (await shown()) throw new Error('keyboard is still shown after HideKeyboard')
+            }
+        } else if (s.platform === 'android') {
             const keycode = ANDROID_KEYS[key]
             if (!keycode) throw new Error(`unsupported key on Android: ${key}`)
             await s.wd.execute('mobile: pressKey', [{ keycode }])
@@ -305,11 +340,11 @@ export class JevDevice {
             }
         } else {
             const started = Date.now()
-            let last = await s.wd.source()
+            let last = (await this.layout(s)).key
             while (Date.now() - started < maxMs) {
                 await swipeBy((to === 'end' ? 1 : -1) * h * 0.6)
                 if (pc === 'human') await sleep(rand(250, 650))
-                const cur = await s.wd.source()
+                const cur = (await this.layout(s)).key
                 if (cur === last) break
                 last = cur
             }

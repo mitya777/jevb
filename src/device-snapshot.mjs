@@ -66,7 +66,8 @@ function ios(n) {
     const accessible = a.accessible === 'true'
     return {
         type, rect, editable,
-        text: clean(a.value), desc: clean(a.label || a.name), hint: clean(a.placeholderValue),
+        // An empty iOS field reports its placeholder as its value.
+        text: a.value === a.placeholderValue ? '' : clean(a.value), desc: clean(a.label || a.name), hint: clean(a.placeholderValue),
         id: '',
         password: type === 'SecureTextField',
         enabled: a.enabled !== 'false',
@@ -99,6 +100,19 @@ function innerText(node, norm, max = 100) {
     return out.slice(0, max)
 }
 
+// The closest text ending just above a field and overlapping it horizontally.
+function nearbyLabel(texts, r) {
+    for (let i = texts.length - 1; i >= 0; i--) {
+        const t = texts[i].rect
+        if (!t) continue
+        const gap = r.y - (t.y + t.h)
+        if (gap < -4 || gap > r.h * 1.5) continue
+        if (t.x + t.w < r.x || t.x > r.x + r.w) continue
+        if (texts[i].t.length <= 40) return texts[i].t
+    }
+    return ''
+}
+
 export function platformOf(xml) {
     return /XCUIElementType/.test(xml.slice(0, 2000)) ? 'ios' : 'android'
 }
@@ -125,13 +139,18 @@ export function deviceSnapshot(xml, screen) {
         if (inKeyboard) continue
 
         // Field contents are reported in `fields` (passwords masked), never as text.
+        // XCUITest names unlabeled web inputs after their type ("TextField").
+        if (d.desc === d.type) d.desc = ''
         const own = d.editable ? d.desc : d.desc || d.text
-        if (own && (platform === 'android' || d.statictext || !d.interactive)) texts.push({ node, t: own })
-        if (d.editable) fields.push({ label: d.hint || d.desc || d.id || d.type, value: d.password ? (d.text ? '(filled)' : '(empty)') : d.text })
+        // Web forms label inputs with text just above them, not an accessible
+        // name (Treechat's sign-up in the app's WebView): borrow that text.
+        const near = d.editable && !d.desc && nearbyLabel(texts, d.rect)
+        if (own && !/^(Vertical|Horizontal) scroll bar, \d+ pages?$/.test(own)) texts.push({ node, t: own, rect: d.rect })
+        if (d.editable) fields.push({ label: d.desc || d.hint || near || d.id || d.type, value: d.password ? (d.text ? '(filled)' : '(empty)') : d.text })
 
         if (!d.interactive || !d.enabled && !d.editable) continue
         const role = ROLE[d.type] || (d.editable ? 'textbox' : 'clickable')
-        const label = (d.editable ? d.desc || d.hint || d.id || d.type
+        const label = (d.editable ? d.desc || d.hint || near || d.id || d.type
             : d.desc || d.text || d.hint || innerText(node, norm) || d.id || d.type).slice(0, 100)
         const r = d.rect
         // Clamp the tap point into the visible part of the element.
@@ -146,7 +165,7 @@ export function deviceSnapshot(xml, screen) {
             `at ${x},${y}`,
         ].filter(Boolean).join(' ')
         const id = `e${++n}`
-        elements.push({ id, role, label, inView: true, x, y, rect: r, editable: d.editable, node, desc: `${role} "${label}" ${extra}`.trim() })
+        elements.push({ id, role, label, inView: true, x, y, rect: r, editable: d.editable, value: d.editable && !d.password ? d.text : '', node, desc: `${role} "${label}" ${extra}`.trim() })
     }
     // With an alert/sheet up, only it is "shown" and only it is tappable.
     const within = (node, anc) => { for (let p = node; p; p = p.parent) if (p === anc) return true; return false }

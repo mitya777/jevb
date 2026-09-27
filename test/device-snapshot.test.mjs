@@ -70,12 +70,37 @@ test('ios: accessible Other is tappable, keyboard keys and decorative images are
     assert.match(elements[1].desc, /textbox "Reply" hint="Write a reply" value="hello"/)
     assert.equal(state.keyboard_open, true)
     assert.match(state.viewport_text, /Hot threads/)
-    assert.deepEqual(state.fields, [{ label: 'Write a reply', value: 'hello' }])
+    assert.match(state.viewport_text, /New thread/, 'button labels are visible text too')
+    assert.deepEqual(state.fields, [{ label: 'Reply', value: 'hello' }])
 })
 
 test('ios: an alert is the only thing shown and tappable', () => {
     const { elements, state } = deviceSnapshot(IOS_ALERT, { w: 393, h: 852 })
     assert.equal(state.modal_open, true)
     assert.deepEqual(elements.map((e) => e.label), ['Allow'])
-    assert.equal(state.viewport_text, 'Allow notifications?')
+    assert.equal(state.viewport_text, 'Allow notifications?\nAllow')
+})
+
+const ANDROID_WEBFORM = `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<hierarchy rotation="0">
+  <android.webkit.WebView class="android.webkit.WebView" text="" clickable="false" enabled="true" displayed="true" bounds="[0,0][1008,2244]">
+    <android.widget.TextView class="android.widget.TextView" text="Username" clickable="false" enabled="true" displayed="true" bounds="[68,560][230,610]" />
+    <android.widget.EditText class="android.widget.EditText" text="" clickable="true" enabled="true" password="false" displayed="true" bounds="[68,625][940,720]" />
+    <android.widget.TextView class="android.widget.TextView" text="Email" clickable="false" enabled="true" displayed="true" bounds="[68,760][200,810]" />
+    <android.widget.EditText class="android.widget.EditText" text="" clickable="true" enabled="true" password="false" displayed="true" bounds="[68,820][940,915]" />
+  </android.webkit.WebView>
+</hierarchy>`
+
+test('unlabeled web inputs borrow the text just above them', () => {
+    const { elements, state } = deviceSnapshot(ANDROID_WEBFORM, { w: 1008, h: 2244 })
+    assert.deepEqual(elements.map((e) => e.label), ['Username', 'Email'])
+    assert.deepEqual(state.fields.map((f) => f.label), ['Username', 'Email'])
+})
+
+test('ios: an empty field reporting its placeholder as value is empty', () => {
+    const xml = `<AppiumAUT><XCUIElementTypeApplication type="XCUIElementTypeApplication" visible="true" x="0" y="0" width="393" height="852">
+      <XCUIElementTypeSecureTextField type="XCUIElementTypeSecureTextField" name="SecureTextField" value="8 character minimum" placeholderValue="8 character minimum" enabled="true" visible="true" accessible="true" x="16" y="300" width="361" height="44"/>
+    </XCUIElementTypeApplication></AppiumAUT>`
+    const { state } = deviceSnapshot(xml, { w: 393, h: 852 })
+    assert.deepEqual(state.fields, [{ label: '8 character minimum', value: '(empty)' }])
 })

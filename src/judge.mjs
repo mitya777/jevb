@@ -46,6 +46,19 @@ export async function judge({ intent, checks = [], options, state, where }) {
         const top = Object.entries(a.probabilities || {}).sort((x, y) => y[1] - x[1]).slice(0, 3)
             .filter(([, p], i) => i === 0 || p >= 0.01).map(([id, p]) => ({ id, p: +p.toFixed(3), desc: criteria[id] }))
         target = { id: a.choice, confidence: a.confidence, desc: criteria[a.choice], jevMs, batch, requests, top }
+        // An icon and its label often sit on one control ("icon: home" and
+        // "Home", 2px apart) and split Jev's probability below the bar
+        // (0.40 + 0.38). Options within 24px of the pick count as the pick.
+        const at = (d) => d?.match(/ at (-?\d+),(-?\d+)$/)?.slice(1).map(Number)
+        const p0 = a.choice !== 'none' && at(criteria[a.choice])
+        if (p0) {
+            const near = Object.entries(a.probabilities || {}).filter(([id]) => {
+                const p = at(criteria[id])
+                return p && Math.hypot(p[0] - p0[0], p[1] - p0[1]) <= 24
+            })
+            const sum = near.reduce((acc, [, p]) => acc + p, 0)
+            if (near.length > 1 && sum > target.confidence) Object.assign(target, { confidence: +sum.toFixed(3), merged: near.length })
+        }
     }
 
     const lines = checkResults.map((c) => `${c.negate ? 'refute' : 'check'} ${c.noul.toFixed(2)} ${c.pass ? 'PASS ✓' : 'FAIL ✗'}  ${c.question}`)

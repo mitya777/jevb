@@ -3,7 +3,9 @@
 
 export const MAX_OPTIONS = 254 // Jev choice caps at 255; one slot is "none".
 
-function collect() {
+// Runs in the page: Playwright evaluates it, and on phones jevb sends its
+// source through WebDriver's execute (so it must stay self-contained).
+export function collect() {
     const SELECTOR = [
         'a[href]', 'button', 'input:not([type=hidden])', 'textarea', 'select', 'summary',
         '[role=button]', '[role=link]', '[role=tab]', '[role=menuitem]', '[role=option]',
@@ -25,6 +27,23 @@ function collect() {
             if (t && t.length <= 40) return t
         }
         return ''
+    }
+    // Last resort for an unlabeled icon control (no aria-label, no alt):
+    // what a developer would go by. Readable class names (not CSS-module
+    // hashes), a Lucide icon's name, an image's file name. E.g. Treechat's
+    // mobile menu opener -> "icon: sidebar-button space-icon-comp mark-circle".
+    const iconHint = (el) => {
+        const words = new Set()
+        for (const n of [el, ...el.querySelectorAll('*')].slice(0, 12)) {
+            for (const c of n.classList) {
+                const m = c.match(/^lucide-([a-z-]+)$/)
+                if (m) words.add(m[1])
+                else if (/^[a-z]+(-[a-z]+)+$/.test(c) && !/^(flex|h|w|m|p|text|bg|border)-/.test(c)) words.add(c)
+            }
+            const src = n.tagName === 'IMG' && (n.currentSrc || n.src || '').split('?')[0].split('/').pop()
+            if (src) words.add(src.replace(/\.\w+$/, ''))
+        }
+        return words.size ? `icon: ${[...words].slice(0, 5).join(' ')}` : ''
     }
     const vw = innerWidth, vh = innerHeight
     const out = []
@@ -65,7 +84,8 @@ function collect() {
             el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('placeholder')
             || el.getAttribute('alt') || el.labels?.[0]?.innerText || nearbyLabel(el) || el.innerText || el.value
             || el.getAttribute('name') || el.getAttribute('autocomplete') || el.getAttribute('type')
-            || [...el.querySelectorAll('img[alt],svg title')].map((x) => x.getAttribute('alt') || x.textContent).join(' '),
+            || [...el.querySelectorAll('img[alt],svg title')].map((x) => x.getAttribute('alt') || x.textContent).join(' ')
+            || iconHint(el),
         ).slice(0, 100)
         const inView = r.bottom > 0 && r.right > 0 && r.top < vh && r.left < vw
         // Covered by something else (a modal, a sticky bar): not clickable now.
@@ -108,7 +128,12 @@ export function shortlist(elements, intent) {
 // innerText omits form values, so typed input is listed in `fields`;
 // password values are reduced to filled/empty.
 export async function pageState(page, { maxText = 6000 } = {}) {
-    return page.evaluate((maxText) => {
+    return page.evaluate(readState, maxText)
+}
+
+// In-page half of pageState (self-contained, like collect).
+export function readState(maxText) {
+    {
         const clean = (t) => t.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim()
         const vw = innerWidth, vh = innerHeight
         const shown = (el) => {
@@ -162,5 +187,5 @@ export async function pageState(page, { maxText = 6000 } = {}) {
             viewport_text: clean(viewport).slice(0, maxText),
             fields,
         }
-    }, maxText)
+    }
 }

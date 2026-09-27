@@ -26,7 +26,9 @@ export async function ask(state, questions, { retries = 4 } = {}) {
             const json = await res.json()
             return { answers: json.answers, usage: json.usage, model: json.model }
         }
-        if ((res.status === 429 || res.status === 529) && attempt < retries) {
+        // Rate limits and brief upstream outages (a 503 "upstream connect
+        // error" ended a phone run mid-tour).
+        if ([429, 502, 503, 504, 529].includes(res.status) && attempt < retries) {
             await new Promise((r) => setTimeout(r, 250 * 2 ** attempt + Math.random() * 100))
             continue
         }

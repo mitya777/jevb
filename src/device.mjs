@@ -3,12 +3,16 @@
 // screen. Devices come from AWS Device Farm (metered per device-minute) or,
 // with JEVB_APPIUM_URL set, a local Appium server (simulator/emulator/USB).
 //
-// Mobile web runs in Safari/Chrome on the device, but snapshots and taps
-// always use the native tree (NATIVE_APP context): one path for apps and
-// web, and it sees system UI (alerts, keyboards, permission sheets) too.
+// Apps are read from the native accessibility tree (NATIVE_APP context).
+// Mobile web (Safari/Chrome on the device) is read from the page itself,
+// with the same in-page snapshot the desktop browser uses: a long page's
+// native tree is slow to build (a Treechat stream took 44s on an iPhone)
+// and can't tell hidden elements from shown ones cheaply. Gestures and
+// screenshots stay native.
 import fs from 'node:fs'
 import path from 'node:path'
 import { deviceSnapshot, shortlist } from './device-snapshot.mjs'
+import { collect, readState } from './snapshot.mjs'
 import { startSession } from './devicefarm.mjs'
 import { judge } from './judge.mjs'
 import * as pace from './pace.mjs'
@@ -124,13 +128,36 @@ export class JevDevice {
         await wd.context('NATIVE_APP').catch(() => {})
         const r = await wd.windowRect()
         s.screen = { w: r.width, h: r.height }
+        // XCUITest waits for the app to go idle and for animations to cool
+        // off around each gesture; a live web page never does (a Treechat
+        // stream swipe took 28s, 2.6s without). jevb settles on its own.
+        if (web && ios) await wd.req('POST', wd.s('/appium/settings'), { settings: { waitForIdleTimeout: 0, animationCoolOffTimeout: 0, waitForQuiescence: false } })
+        if (s.webContext) await wd.context(s.webContext)
         this.sessions.set(name, s)
         return s
     }
 
     // ---- screen reading --------------------------------------------------
 
+    // Run fn in the native context (gestures, keyboard, full-screen shots)
+    // and come back to the page.
+    async native(s, fn) {
+        if (!s.webContext) return fn()
+        await s.wd.context('NATIVE_APP')
+        try { return await fn() } finally { await s.wd.context(s.webContext) }
+    }
+
+    async readWeb(s) {
+        const [elements, vw] = await s.wd.execute(`return [(${collect})(), innerWidth]`)
+        const state = await s.wd.execute(`return (${readState})(arguments[0])`, [6000])
+        // Off-screen sideways (a phone's slide-out sidebar parked at x<0) is
+        // unreachable until something opens it; below the fold is a scroll away.
+        const sideways = (e) => { const x = Number(e.desc.match(/ at (-?\d+),-?\d+$/)?.[1]); return !e.inView && (x < 0 || x >= vw) }
+        return { platform: s.platform, elements: elements.filter((e) => !sideways(e)).map((e) => ({ ...e, web: true })), all: elements, state }
+    }
+
     async read(s) {
+        if (s.webContext) return this.readWeb(s)
         const snap = deviceSnapshot(await s.wd.source(), s.screen)
         if (s.platform !== 'ios' || snap.state.modal_open) return snap
         // iOS system alerts (permission prompts) belong to SpringBoard and
@@ -146,22 +173,26 @@ export class JevDevice {
         }
     }
 
-    // Wait for the UI to stop changing (two identical sources), capped. Human
-    // pace adds a reading pause scaled by the text on screen.
     // What the screen offers, for "has it stopped changing": the tappable
     // elements and where they are. Raw source is too noisy (an app's live
     // debug overlay or ticking counters would never settle).
     async layout(s) {
-        const snap = deviceSnapshot(await s.wd.source(), s.screen)
-        return { snap, key: snap.elements.map((e) => e.desc).join('\n') }
+        const snap = s.webContext ? await this.readWeb(s) : deviceSnapshot(await s.wd.source(), s.screen)
+        // All elements, sideways ones too: a slide-out menu moving in is not
+        // settled. On a page also its text and load state, like the desktop
+        // browser: an SPA's loading placeholder has a stable layout too.
+        const page = snap.state && s.webContext ? `\n${snap.state.viewport_text.length} ${await s.wd.execute('return document.readyState')}` : ''
+        return { snap, key: (snap.all || snap.elements).map((e) => e.desc).join('\n') + page, ready: !page || page.endsWith('complete') && snap.state.viewport_text.length > 0 }
     }
 
+    // Wait for the layout to stop changing, capped. Human pace adds a
+    // reading pause scaled by the text on screen.
     async settle(s, pc, { maxMs = 4_000 } = {}) {
         const started = Date.now()
         let last = null, cur
         while (Date.now() - started < maxMs) {
             cur = await this.layout(s)
-            if (cur.key === last) break
+            if (cur.key === last && cur.ready) break
             last = cur.key
             await sleep(250)
         }
@@ -175,7 +206,7 @@ export class JevDevice {
             intent, checks,
             options: async () => shortlist((snap ||= await this.read(s)).elements, intent),
             state: async () => (snap ||= await this.read(s)).state,
-            where: async () => ({ platform: s.platform, device: s.device, ...(s.web && { browser: s.platform === 'ios' ? 'Safari' : 'Chrome' }) }),
+            where: async () => ({ platform: s.platform, device: s.device, ...(s.webContext && { browser: s.platform === 'ios' ? 'Safari' : 'Chrome', url: await s.wd.currentUrl() }) }),
         })
         this.jevRequests += res.requests
         const el = res.target && (snap?.elements || []).find((e) => e.id === res.target.id)
@@ -198,6 +229,35 @@ export class JevDevice {
             if (pc === 'human') await sleep(rand(250, 700))
             return s.wd.execute('mobile: alert', [{ action: 'accept', buttonLabel: el.alertButton }])
         }
+        if (el.web) {
+            const id = await this.webElement(s, el)
+            const ref = { 'element-6066-11e4-a52e-4f735466cecf': id }
+            // Like Playwright: bring it into view first, clear of sticky
+            // headers (Chrome refuses a click on a covered element).
+            const r = await s.wd.execute('arguments[0].scrollIntoView({ block: "center", behavior: "instant" }); const r = arguments[0].getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, vw: innerWidth }', [ref])
+            if (pc === 'human') await sleep(rand(250, 700))
+            if (s.platform === 'android') {
+                await s.wd.req('POST', s.wd.s(`/element/${id}/click`), {})
+                return id
+            }
+            // iOS: a real touch at the element's spot on screen. Appium's
+            // nativeWebTap misplaces taps near the top of an iOS 27 Safari
+            // page (they land on the status bar, so a top-left menu button
+            // never opened).
+            const dy = await this.pageTop(s)
+            if (dy == null) { await s.wd.execute('arguments[0].click()', [ref]); return id }
+            const k = s.screen.w / r.vw
+            await this.native(s, () => s.wd.actions([{
+                type: 'pointer', id: 'finger1', parameters: { pointerType: 'touch' },
+                actions: [
+                    { type: 'pointerMove', duration: 0, x: Math.round(r.x * k), y: Math.round(dy + r.y * k) },
+                    { type: 'pointerDown', button: 0 },
+                    { type: 'pause', duration: pc === 'human' ? Math.round(rand(60, 140)) : 40 },
+                    { type: 'pointerUp', button: 0 },
+                ],
+            }]))
+            return id
+        }
         let { x, y } = el
         if (pc === 'human') {
             // A thumb lands near the middle, not on the exact center pixel.
@@ -217,17 +277,60 @@ export class JevDevice {
         }])
     }
 
+    // Where the page's top edge is on screen (iOS), measured once per session:
+    // Safari's web view spans the whole screen but the page starts below
+    // the status bar. Take a short-labelled element on screen, find it in the
+    // native tree (one lookup, ~4s), and compare the two vertical centres.
+    async pageTop(s) {
+        if (s.pageTop !== undefined) return s.pageTop
+        const cands = await s.wd.execute(`return [...document.querySelectorAll('[data-jevb]')].map((e) => {
+            const r = e.getBoundingClientRect()
+            return { t: (e.getAttribute('aria-label') || e.innerText || '').trim(), y: r.y + r.height / 2, w: r.width }
+        }).filter((c) => c.t && c.t.length <= 30 && !c.t.includes('\\n') && c.y > 0 && c.y < innerHeight && c.w < innerWidth * 0.9).slice(0, 3)`)
+        const k = s.screen.w / (await s.wd.execute('return innerWidth'))
+        s.pageTop = await this.native(s, async () => {
+            for (const c of cands) {
+                const found = await s.wd.req('POST', s.wd.s('/element'), { using: 'accessibility id', value: c.t }).catch(() => null)
+                const nr = found && await s.wd.req('GET', s.wd.s(`/element/${Object.values(found)[0]}/rect`)).catch(() => null)
+                const dy = nr && nr.y + nr.height / 2 - c.y * k
+                if (dy >= 0 && dy <= 200) return dy
+            }
+            return null
+        })
+        this.log(`page top on screen: ${s.pageTop == null ? 'unknown (JS clicks)' : `${Math.round(s.pageTop)}pt`}`)
+        return s.pageTop
+    }
+
+    async webElement(s, el) {
+        const found = await s.wd.req('POST', s.wd.s('/element'), { using: 'css selector', value: `[data-jevb="${el.id}"]` })
+        return Object.values(found)[0]
+    }
+
     async swipe(s, from, to, ms) {
-        await s.wd.actions([{
+        // Android web: gesture inside the page (Chromedriver touch, page px);
+        // switching to native and back costs ~3.5s each way there.
+        const inPage = s.webContext && s.platform === 'android'
+        // Screen units → page px: scale by width, keep inside the visible
+        // viewport (the screen also has the status bar and Chrome's toolbar).
+        // Measured per swipe: it changes with the page and its zoom.
+        const vp = inPage && await s.wd.execute('const v = window.visualViewport; return v ? { w: v.width, h: v.height } : { w: innerWidth, h: innerHeight }')
+        const k = inPage ? vp.w / s.screen.w : 1
+        const clamp = (v, max) => Math.min(Math.max(v, 1), max - 1)
+        const pt = (p) => (inPage
+            ? { x: Math.round(clamp(p.x * k, vp.w)), y: Math.round(clamp(p.y * k, vp.h)) }
+            : { x: Math.round(p.x), y: Math.round(p.y) })
+        const actions = [{
             type: 'pointer', id: 'finger1', parameters: { pointerType: 'touch' },
             actions: [
-                { type: 'pointerMove', duration: 0, x: Math.round(from.x), y: Math.round(from.y) },
+                { type: 'pointerMove', duration: 0, ...pt(from) },
                 { type: 'pointerDown', button: 0 },
                 { type: 'pause', duration: 40 },
-                { type: 'pointerMove', duration: Math.round(ms), x: Math.round(to.x), y: Math.round(to.y) },
+                { type: 'pointerMove', duration: Math.round(ms), ...pt(to) },
                 { type: 'pointerUp', button: 0 },
             ],
-        }])
+        }]
+        if (inPage) return s.wd.actions(actions)
+        return this.native(s, () => s.wd.actions(actions))
     }
 
     // ---- actions (same shapes as JevBrowser) -----------------------------
@@ -241,9 +344,7 @@ export class JevDevice {
         s ||= await this.start(session, { device, platform, app, url })
         if (url) {
             if (!s.webContext) throw new Error('this device session is an app, not a browser; open it with a url and no --app')
-            await s.wd.context(s.webContext)
             await s.wd.url(url)
-            await s.wd.context('NATIVE_APP')
         }
         await this.settle(s, pc)
         return { device: s.device, platform: s.platform, ...(url && { url }), ...(s.remote && { deviceFarmSession: s.remote.arn, deviceStartMs: s.remote.startMs }) }
@@ -260,15 +361,16 @@ export class JevDevice {
     async type(intent, text, { session, pace: p, submit = false, checks } = {}) {
         const pc = pace.resolvePace(p || this.pace)
         const { s, el, target, checks: checkResults } = await this.find(intent, { session, checks })
-        await this.tap(s, el, pc)
+        const tapped = await this.tap(s, el, pc)
         await sleep(pc === 'human' ? rand(300, 600) : 300) // keyboard comes up
-        // iOS appends each element send. UiAutomator2 replaces the whole value
-        // (and key events go through the IME, which autocapitalizes), so
-        // Android sets prefix + typed-so-far: exact text, still appending.
-        const field = await s.wd.activeElement()
-        const prefix = s.platform === 'ios' ? '' : el.value || ''
+        // Web fields and iOS append each element send. UiAutomator2 replaces
+        // the whole value (and key events go through the IME, which
+        // autocapitalizes), so native Android sets prefix + typed-so-far.
+        const field = el.web ? tapped : await s.wd.activeElement()
+        const replaces = !el.web && s.platform === 'android'
+        const prefix = replaces ? el.value || '' : ''
         let typed = ''
-        const send = (chunk) => { typed += chunk; return s.wd.sendKeysTo(field, s.platform === 'ios' ? chunk : prefix + typed) }
+        const send = (chunk) => { typed += chunk; return s.wd.sendKeysTo(field, replaces ? prefix + typed : chunk) }
         if (pc === 'agent') await send(text)
         else {
             for (let i = 0; i < text.length;) {
@@ -291,6 +393,16 @@ export class JevDevice {
         const pc = pace.resolvePace(p || this.pace)
         const s = this.session(session)
         if (pc === 'human') await sleep(rand(120, 350))
+        // On a web page, Enter and Back belong to the page; keyboard and
+        // hardware keys are native.
+        if (s.webContext && key === 'Enter') await s.wd.sendKeysTo(await s.wd.activeElement(), '\uE007')
+        else if (s.webContext && key === 'Back') await s.wd.req('POST', s.wd.s('/back'), {})
+        else await this.native(s, () => this.pressNative(s, key))
+        await this.settle(s, pc)
+        return { pressed: key }
+    }
+
+    async pressNative(s, key) {
         if (key === 'HideKeyboard') {
             const shown = () => s.wd.req('GET', s.wd.s('/appium/device/is_keyboard_shown'))
             if (await shown()) {
@@ -313,22 +425,24 @@ export class JevDevice {
             const { w, h } = s.screen
             await this.swipe(s, { x: 2, y: h / 2 }, { x: w * 0.7, y: h / 2 }, 250)
         } else throw new Error(`unsupported key on iOS: ${key}`)
-        await this.settle(s, pc)
-        return { pressed: key }
     }
 
     // dy > 0 scrolls content down (finger swipes up). 'end'/'top' swipe until
     // the screen stops changing (capped for infinite feeds).
-    async scroll(dy = 600, { session, pace: p, maxMs = 20_000 } = {}) {
+    // A phone gesture costs seconds (iOS ~3s), so the cap for infinite feeds
+    // is longer than the browser's: a 6.5k-px page needs ~7 flicks.
+    async scroll(dy = 600, { session, pace: p, maxMs = 45_000 } = {}) {
         const pc = pace.resolvePace(p || this.pace)
         const s = this.session(session)
         const { w, h } = s.screen
         const to = ['end', 'bottom'].includes(dy) ? 'end' : dy === 'top' ? 'top' : null
+        // To the end/top a person flicks (short, fast: the page glides on);
+        // for a measured distance they drag.
         const swipeBy = async (dist) => {
             const x = w / 2 + (pc === 'human' ? rand(-w * 0.1, w * 0.1) : 0)
             const y0 = dist > 0 ? h * 0.75 : h * 0.25
             await this.swipe(s, { x, y: y0 }, { x: x + (pc === 'human' ? rand(-15, 15) : 0), y: y0 - dist },
-                pc === 'human' ? rand(250, 450) : 180)
+                pc === 'agent' ? 180 : to ? rand(150, 260) : rand(250, 450))
         }
         if (!to) {
             let left = Number(dy)
@@ -369,7 +483,8 @@ export class JevDevice {
 
     async screenshot(file, { session } = {}) {
         const s = this.session(session)
-        fs.writeFileSync(file, Buffer.from(await s.wd.screenshot(), 'base64'))
+        // Native: the whole phone screen, browser chrome included.
+        fs.writeFileSync(file, Buffer.from(await this.native(s, () => s.wd.screenshot()), 'base64'))
         return { path: file }
     }
 

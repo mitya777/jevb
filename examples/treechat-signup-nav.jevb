@@ -1,0 +1,7 @@
+# Read-only smoke: logged-out root redirects to login, Join leads to signup.
+pace agent
+open https://app.treechat.com/
+check is this a login page?
+act go to create a new account
+check is a sign-up form shown?
+refute is an error or "not found" page shown?

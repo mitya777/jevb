@@ -1,0 +1,6 @@
+pace human
+open file:///Users/dmitriyfabrikant/src/jev-browser/test/fixture.html
+type the reply box => hello from jevb
+act submit the reply
+check does the page show a posted reply that says "hello from jevb"?
+refute is an error message shown on the page?

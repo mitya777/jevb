@@ -1,0 +1,15 @@
+{
+  "name": "jev-browser",
+  "version": "0.1.0",
+  "description": "On-demand headless Chromium for agents, with Jev (TypeSafe System One) deciding what to click and whether checks pass. Human pace by default, agent pace on request.",
+  "type": "module",
+  "bin": { "jevb": "bin/jevb.mjs" },
+  "exports": { ".": "./src/index.mjs" },
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test test/"
+  },
+  "dependencies": {
+    "playwright-core": "1.57.0"
+  }
+}

@@ -11,7 +11,8 @@
 //   refute is an error message shown?           # passes if noul < 0.3
 //   shot out/after-post.png
 //
-// Exit code is non-zero if any check fails or any step throws.
+// Exit code is non-zero if any check fails or any step throws. Consecutive
+// checks are batched into one Jev request (see runScenario).
 import fs from 'node:fs'
 import path from 'node:path'
 import { JevBrowser } from './browser.mjs'
@@ -26,48 +27,70 @@ export function parse(text) {
         })
 }
 
-export async function runScenario(file, { pace, baseUrl, onStep = console.log } = {}) {
+const isCheck = (s) => s.cmd === 'check' || s.cmd === 'refute'
+const toCheck = (s) => ({ question: s.arg, threshold: s.threshold, negate: s.cmd === 'refute' })
+
+// Consecutive check/refute steps become one Jev request. If the next step is
+// act/type they join that step's element-choice request too (same page
+// state, and checks describe the page before the action either way).
+// batch:false runs every step on its own, for comparison.
+export async function runScenario(file, { pace, baseUrl, batch = true, onStep = console.log } = {}) {
     const steps = parse(fs.readFileSync(file, 'utf8'))
     const b = new JevBrowser({ pace, idleMs: 10 * 60_000 })
     const results = []
     let failed = 0
     const started = Date.now()
     let lastWorkEnd = started // end of the last non-wait step: trailing waits don't count
+    const emit = (r) => { results.push(r); onStep(r) }
+    const emitChecks = (checkSteps, checkResults, ms) => checkSteps.forEach((cs, i) => {
+        const c = checkResults[i]
+        if (!c.pass) failed++
+        emit({ line: cs.line, step: cs.src, ms, ...c })
+    })
     try {
-        for (const s of steps) {
+        for (let i = 0; i < steps.length; i++) {
+            let s = steps[i]
+            let pending = []
+            if (isCheck(s)) {
+                if (batch) while (i < steps.length && isCheck(steps[i])) pending.push(steps[i++])
+                else pending.push(steps[i++])
+                s = batch && steps[i] && ['act', 'type'].includes(steps[i].cmd) ? steps[i] : null
+                if (!s) i-- // no action to ride along with: the checks go alone
+            }
             const t = Date.now()
-            let out
-            b.step = s.src
+            b.step = [...pending, ...(s ? [s] : [])].map((x) => x.src).join('\n  + ')
             if (b.demo && b.sessions.size) await b.hud(await b.page().catch(() => null)).catch(() => {})
+            let out
+            const checks = pending.map(toCheck)
             try {
+                if (!s) {
+                    emitChecks(pending, await b.checks(checks), Date.now() - t)
+                    lastWorkEnd = Date.now()
+                    continue
+                }
                 switch (s.cmd) {
                     case 'pace': b.pace = s.arg; out = { pace: s.arg }; break
                     case 'open': out = await b.open(baseUrl ? new URL(s.arg, baseUrl).href : s.arg); break
-                    case 'act': out = await b.act(s.arg); break
+                    case 'act': out = await b.act(s.arg, { checks }); break
                     case 'type': {
                         const [intent, text] = s.arg.split(/\s*=>\s*/)
-                        out = await b.type(intent, text ?? '')
+                        out = await b.type(intent, text ?? '', { checks })
                         break
                     }
                     case 'press': out = await b.press(s.arg); break
                     case 'scroll': out = await b.scroll(s.arg || 600); break
                     case 'wait': await new Promise((r) => setTimeout(r, Number(s.arg))); out = {}; break
-                    case 'check':
-                    case 'refute':
-                        out = await b.check(s.arg, { threshold: s.threshold, negate: s.cmd === 'refute' })
-                        if (!out.pass) failed++
-                        break
                     case 'shot': fs.mkdirSync(path.dirname(s.arg), { recursive: true }); out = await b.screenshot(s.arg); break
                     default: throw new Error(`unknown step "${s.cmd}"`)
                 }
             } catch (e) {
                 failed++
-                out = { error: e.message, detail: e.detail }
+                out = { error: e.message, detail: e.detail, checks: e.checks }
             }
             if (s.cmd !== 'wait') lastWorkEnd = Date.now()
-            const r = { line: s.line, step: s.src, ms: Date.now() - t, ...out }
-            results.push(r)
-            onStep(r)
+            const { checks: checkResults, ...rest } = out
+            if (pending.length && checkResults) emitChecks(pending, checkResults, Date.now() - t)
+            emit({ line: s.line, step: s.src, ms: Date.now() - t, ...rest })
             if (out.error) break // later steps depend on page state; stop at first error
         }
         if (b.demo) {
@@ -78,5 +101,5 @@ export async function runScenario(file, { pace, baseUrl, onStep = console.log } 
     } finally {
         var { videos } = await b.shutdown('scenario done')
     }
-    return { failed, results, videos, totalMs: lastWorkEnd - started }
+    return { failed, results, videos, jevCalls: b.jevRequests, totalMs: lastWorkEnd - started }
 }

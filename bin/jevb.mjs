@@ -19,12 +19,16 @@ const USAGE = `jevb <command> [args] [--pace human|agent] [--session NAME]
   scroll [dy]                      default 600
   check <question...>              Jev noul over the page; exit 1 if < --threshold (0.7)
   refute <question...>             inverse check; exit 1 if >= --threshold (0.3)
+  checks --check Q --refute Q ...  many checks in ONE Jev request; exit 1 if any fail
+  act/type ... --check Q --refute Q  ride checks along with the element choice
   snap                             list interactive elements Jev chooses from
   shot <path> [--full]             screenshot
   pace [human|agent]               get/set the daemon default pace
   close                            close session (last one closes chromium)
   status | stop | serve
-  run <scenario.jevb> [--base URL] run a scenario file in-process (for tests)
+  run <scenario.jevb> [--base URL] run a scenario file in-process (for tests);
+                                   consecutive checks batch into one Jev call
+                                   (--no-batch to compare)
 
 Pace: human (default) = curved mouse, hover dwell, per-key typing, reading
 pauses. agent = as fast as possible. Env: TYPESAFEAI_API_KEY (or ./.env),
@@ -41,7 +45,8 @@ function parseArgs(argv) {
         else if (a.startsWith('--')) {
             const k = a.slice(2)
             const next = argv[i + 1]
-            if (['enter', 'full', 'help'].includes(k)) flags[k] = true
+            if (['enter', 'full', 'help', 'no-batch'].includes(k)) flags[k] = true
+            else if (k === 'check' || k === 'refute') { (flags[k] ||= []).push(next); i++ }
             else { flags[k] = next; i++ }
         } else pos.push(a)
     }
@@ -77,8 +82,8 @@ async function main() {
     if (cmd === 'serve') return (await import('../src/daemon.mjs')).serve()
     if (cmd === 'run') {
         const { runScenario } = await import('../src/scenario.mjs')
-        const { failed, videos, totalMs } = await runScenario(pos[0], { pace: flags.pace, baseUrl: flags.base, onStep: (r) => console.log(JSON.stringify(r)) })
-        console.log(JSON.stringify({ done: true, failed, totalMs, videos }))
+        const { failed, videos, totalMs, jevCalls } = await runScenario(pos[0], { pace: flags.pace, baseUrl: flags.base, batch: !flags['no-batch'], onStep: (r) => console.log(JSON.stringify(r)) })
+        console.log(JSON.stringify({ done: true, failed, totalMs, jevCalls, videos }))
         process.exitCode = failed ? 1 : 0
         return
     }
@@ -87,7 +92,8 @@ async function main() {
         return
     }
 
-    const common = { session: flags.session, pace: flags.pace }
+    const batched = [...(flags.check || []).map((q) => ({ question: q })), ...(flags.refute || []).map((q) => ({ question: q, negate: true }))]
+    const common = { session: flags.session, pace: flags.pace, ...(batched.length && { checks: batched }) }
     const text = pos.join(' ')
     const args = {
         status: {}, snap: common, close: common,
@@ -100,13 +106,15 @@ async function main() {
         refute: { ...common, question: text, threshold: flags.threshold, negate: true },
         shot: { ...common, path: path.resolve(pos[0] || 'jevb.png'), fullPage: !!flags.full },
         pace: { pace: pos[0] },
+        checks: common,
     }[cmd]
     if (!args) { console.error(USAGE); process.exitCode = 2; return }
 
     await ensureDaemon()
     const { ok, body } = await call(cmd === 'refute' ? 'check' : cmd, args)
     print(body)
-    if (!ok || (['check', 'refute'].includes(cmd) && !body.pass)) process.exitCode = 1
+    const checkList = cmd === 'checks' ? body : body.checks || (['check', 'refute'].includes(cmd) ? [body] : [])
+    if (!ok || (Array.isArray(checkList) && checkList.some((c) => !c.pass))) process.exitCode = 1
 }
 
 main().catch((e) => { print({ error: e.message }); process.exitCode = 1 })

@@ -15,6 +15,7 @@ const ACTIONS = {
     press: (b, a) => b.press(a.key, a),
     scroll: (b, a) => b.scroll(a.dy, a),
     check: (b, a) => b.check(a.question, a),
+    checks: (b, a) => b.checks(a.checks || [], a),
     snap: (b, a) => b.snap(a),
     shot: (b, a) => b.screenshot(a.path, a),
     close: (b, a) => b.close(a),
@@ -44,7 +45,7 @@ export function serve() {
             }
             send(200, await ACTIONS[name](browser, args))
         } catch (e) {
-            send(500, { error: e.message, code: e.code, detail: e.detail })
+            send(500, { error: e.message, code: e.code, detail: e.detail, checks: e.checks })
         }
     })
     server.listen(PORT, '127.0.0.1', () => console.log(`jevb daemon on 127.0.0.1:${PORT} (pace ${browser.pace}, browser starts on demand)`))

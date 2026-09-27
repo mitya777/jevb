@@ -11,6 +11,18 @@ function collect() {
         '[contenteditable=""]', '[contenteditable=true]', '[onclick]', '[tabindex]:not([tabindex="-1"])',
     ].join(',')
     const clean = (s) => (s || '').replace(/\s+/g, ' ').trim()
+    // Form fields labelled by a sibling <div>/<span> instead of <label for>.
+    const nearbyLabel = (el) => {
+        if (!el.matches('input,textarea,select,[role=textbox],[contenteditable]')) return ''
+        const by = el.getAttribute('aria-labelledby')
+        if (by) return by.split(/\s+/).map((id) => document.getElementById(id)?.innerText || '').join(' ')
+        for (let n = el, depth = 0; n && depth < 3; n = n.parentElement, depth++) {
+            const prev = n.previousElementSibling
+            const t = clean(prev?.innerText)
+            if (t && t.length <= 40) return t
+        }
+        return ''
+    }
     const vw = innerWidth, vh = innerHeight
     const out = []
     let n = 0
@@ -28,7 +40,7 @@ function collect() {
         const role = el.getAttribute('role') || (el.isContentEditable ? 'editor' : el.tagName.toLowerCase())
         const label = clean(
             el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('placeholder')
-            || el.getAttribute('alt') || el.labels?.[0]?.innerText || el.innerText || el.value
+            || el.getAttribute('alt') || el.labels?.[0]?.innerText || nearbyLabel(el) || el.innerText || el.value
             || el.getAttribute('name') || el.getAttribute('autocomplete') || el.getAttribute('type')
             || [...el.querySelectorAll('img[alt],svg title')].map((x) => x.getAttribute('alt') || x.textContent).join(' '),
         ).slice(0, 100)
@@ -60,10 +72,25 @@ export function shortlist(elements, intent) {
     return [...elements].sort((a, b) => score(b) - score(a)).slice(0, MAX_OPTIONS)
 }
 
+// What checks see. innerText omits form values, so typed input is listed
+// separately; password values are reduced to filled/empty.
 export async function pageState(page, { maxText = 8000 } = {}) {
-    return page.evaluate((maxText) => ({
-        url: location.href,
-        title: document.title,
-        visible_text: (document.body?.innerText || '').replace(/\n{3,}/g, '\n\n').slice(0, maxText),
-    }), maxText)
+    return page.evaluate((maxText) => {
+        const fields = []
+        for (const el of document.querySelectorAll('input:not([type=hidden]),textarea,select,[contenteditable=""],[contenteditable=true]')) {
+            const r = el.getBoundingClientRect()
+            if (r.width < 2 || r.height < 2) continue
+            const name = (el.labels?.[0]?.innerText || el.getAttribute('aria-label') || el.getAttribute('placeholder')
+                || el.getAttribute('name') || el.type || 'field').trim().slice(0, 60)
+            let value = el.isContentEditable ? el.innerText : el.type === 'checkbox' || el.type === 'radio' ? String(el.checked) : el.value
+            if (el.type === 'password') value = value ? '(filled)' : '(empty)'
+            fields.push({ field: name, type: el.type || (el.isContentEditable ? 'editor' : el.tagName.toLowerCase()), value: (value || '').slice(0, 200) })
+        }
+        return {
+            url: location.href,
+            title: document.title,
+            visible_text: (document.body?.innerText || '').replace(/\n{3,}/g, '\n\n').slice(0, maxText),
+            fields,
+        }
+    }, maxText)
 }

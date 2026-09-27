@@ -40,6 +40,8 @@ jevb act go to create a new account
 jevb type the email field -- someone@example.com
 jevb check is a sign-up form shown?
 jevb refute is an error page shown?
+jevb checks --check 'is this a login page?' --refute 'is an error shown?'   # 1 Jev request
+jevb act open the composer --check 'is the feed loaded?'   # checks run in parallel with the pick
 jevb snap                 # what Jev chooses from
 jevb shot out.png --full
 jevb stop
@@ -69,9 +71,27 @@ jevb run my.jevb --base http://localhost:5174 --pace human
 The runner stops at the first step that throws. It exits non-zero if any
 check fails.
 
+### Batching
+
+Consecutive `check`/`refute` steps go to Jev as **one request**, since they
+share the same page state. If the next step is `act`/`type`, the batch is sent
+**at the same time** as that step's element-choice request, so it costs one
+round trip, not two. Checks always see the page *before* the action.
+
+The element choice never shares a request with the page text. Measured on
+Treechat signup, the page text in the state dropped the pick's confidence
+from 0.94 to about 0.5 for the same intent. `--no-batch` runs every step on its own
+for comparison. Batched and standalone nouls matched within 0.01 on the demo.
+
+Checks see `visible_text`, `url`, `title`, and `fields`: form values, which
+`innerText` leaves out. Passwords show only as `(filled)`/`(empty)`.
+
 Library use: `import { JevBrowser, runScenario } from 'jev-browser'`.
 
 ## Cost / speed (measured 2026-09-26)
+
+- `examples/demo-treechat.jevb` (10 checks, 3 actions, agent pace):
+  batched 2.2–3.1s with 7 Jev requests; `--no-batch` 4.0–4.2s with 13.
 
 - Fixture flow (type, click, 2 checks): ~2.5s at agent pace, ~6s at human pace.
 - Jev calls: 140–310ms each.

@@ -1,10 +1,17 @@
 # Demo: read-only walk through Treechat's logged-out flow. Types a name into
-# the signup form but never submits it.
+# the signup form but never submits it. Consecutive checks batch into one Jev
+# request together with the next act/type.
 open https://app.treechat.com/
 check is this a login page?
+check is there a password field?
+refute is the user already logged in?
 act go to create a new account
 check is a sign-up form shown?
-type the display name field => jevb demo
+check does the form ask for a username, email and password?
 refute is an error or "not found" page shown?
+type the username field => jevb demo
+check does the username field contain "jevb demo"?
+refute is the password field filled in?
 act go back to the login page
 check is this a login page?
+refute is an error or "not found" page shown?

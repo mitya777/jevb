@@ -15,6 +15,7 @@ export class JevBrowser {
         demo = process.env.JEVB_DEMO === '1', videoDir = process.env.JEVB_VIDEO || null } = {}) {
         Object.assign(this, { idleMs, headless, viewport, minConfidence, log, demo, videoDir })
         this.step = ''
+        this.jevRequests = 0
         this.pace = pace.resolvePace(p)
         this.browser = null
         this.launching = null
@@ -110,45 +111,79 @@ export class JevBrowser {
         return { url: page.url(), status: res?.status() ?? null, title: await page.title() }
     }
 
-    // Jev picks which element an intent refers to. Low confidence or "none"
-    // throws with the top candidates so the calling agent can rephrase.
-    async find(intent, { session } = {}) {
-        const page = await this.page(session)
-        const all = await snapshot(page)
-        const options = shortlist(all, intent)
-        if (!options.length) throw Object.assign(new Error('no interactive elements on page'), { code: 'NO_ELEMENTS' })
-        const criteria = Object.fromEntries(options.map((e) => [e.id, e.desc]))
-        criteria.none = 'No element on the page matches the intent'
+    // Jev judgments for one page state: an optional element choice for
+    // `intent` plus any number of page checks (nouls). All checks share one
+    // request (same state). The choice goes in its own request, sent at the
+    // same time: page text in its state measurably lowers pick confidence
+    // (0.94 → ~0.5 on Treechat signup), so the two never share state.
+    // Checks see the page as it is *before* the action.
+    async judge(page, { intent, checks = [] } = {}) {
+        let criteria
+        const choiceReq = intent && (async () => {
+            const options = shortlist(await snapshot(page), intent)
+            if (!options.length) throw Object.assign(new Error('no interactive elements on page'), { code: 'NO_ELEMENTS' })
+            criteria = Object.fromEntries(options.map((e) => [e.id, e.desc]))
+            criteria.none = 'No element on the page matches the intent'
+            return ask({ intent, page: { url: page.url(), title: await page.title() } },
+                { target: { type: 'choice', instructions: 'Which page element should a user interact with to accomplish `intent`?', criteria } })
+        })()
+        const checksReq = checks.length && (async () => ask(await pageState(page), Object.fromEntries(checks.map((c, i) => [
+            `check_${i}`, { type: 'noul', instructions: `Looking at the current page (\`visible_text\`, \`fields\`, \`url\`, \`title\`): ${c.question}` },
+        ]))))()
         const t = Date.now()
-        const { answers } = await ask(
-            { intent, page: { url: page.url(), title: await page.title() } },
-            { target: { type: 'choice', instructions: 'Which page element should a user interact with to accomplish `intent`?', criteria } },
-        )
-        const a = answers.target
-        const top = Object.entries(a.probabilities || {}).sort((x, y) => y[1] - x[1]).slice(0, 3)
-            .filter(([id, p], i) => i === 0 || p >= 0.01).map(([id, p]) => ({ id, p: +p.toFixed(3), desc: criteria[id] }))
-        const result = { id: a.choice, confidence: a.confidence, desc: criteria[a.choice], jevMs: Date.now() - t, top }
-        await this.hud(page, `Jev picked ${result.desc.replace(/ at \d+,\d+$/, '')}  conf ${a.confidence.toFixed(2)}  ${result.jevMs}ms`)
-        if (a.choice === 'none' || a.confidence < this.minConfidence) {
-            throw Object.assign(new Error(`no confident match for "${intent}"`), { code: 'NO_MATCH', detail: result })
+        const [choiceRes, checksRes] = await Promise.all([choiceReq || null, checksReq || null])
+        const answers = { ...choiceRes?.answers, ...checksRes?.answers }
+        const jevMs = Date.now() - t
+        const requests = (choiceRes ? 1 : 0) + (checksRes ? 1 : 0)
+        this.jevRequests += requests
+        const batch = checks.length + (intent ? 1 : 0)
+
+        const checkResults = checks.map((c, i) => {
+            const negate = !!c.negate
+            const threshold = Number(c.threshold ?? (negate ? 0.3 : 0.7))
+            const noul = answers[`check_${i}`].noul
+            return { question: c.question, noul, threshold, negate, pass: negate ? noul < threshold : noul >= threshold, jevMs, batch, requests }
+        })
+        let target = null
+        if (intent) {
+            const a = answers.target
+            const top = Object.entries(a.probabilities || {}).sort((x, y) => y[1] - x[1]).slice(0, 3)
+                .filter(([, p], i) => i === 0 || p >= 0.01).map(([id, p]) => ({ id, p: +p.toFixed(3), desc: criteria[id] }))
+            target = { id: a.choice, confidence: a.confidence, desc: criteria[a.choice], jevMs, batch, requests, top }
         }
-        return { page, locator: page.locator(`[data-jevb="${a.choice}"]`), ...result }
+
+        const lines = checkResults.map((c) => `${c.negate ? 'refute' : 'check'} ${c.noul.toFixed(2)} ${c.pass ? 'PASS ✓' : 'FAIL ✗'}  ${c.question}`)
+        if (target) lines.push(`picked ${target.desc.replace(/ at \d+,\d+$/, '')}  conf ${target.confidence.toFixed(2)}`)
+        await this.hud(page, `Jev ${batch} question${batch > 1 ? 's' : ''} · ${requests} parallel request${requests > 1 ? 's' : ''} · ${jevMs}ms\n  ${lines.join('\n  ')}`)
+        return { target, checks: checkResults }
     }
 
-    async act(intent, { session, pace: p } = {}) {
+    // Jev picks which element an intent refers to. Low confidence or "none"
+    // throws with the top candidates (and any batched check results) so the
+    // calling agent can rephrase.
+    async find(intent, { session, checks } = {}) {
+        const page = await this.page(session)
+        const { target, checks: checkResults } = await this.judge(page, { intent, checks })
+        if (target.id === 'none' || target.confidence < this.minConfidence) {
+            throw Object.assign(new Error(`no confident match for "${intent}"`), { code: 'NO_MATCH', detail: target, checks: checkResults })
+        }
+        return { page, locator: page.locator(`[data-jevb="${target.id}"]`), target, checks: checkResults }
+    }
+
+    async act(intent, { session, pace: p, checks } = {}) {
         const pc = pace.resolvePace(p || this.pace)
-        const { page, locator, ...picked } = await this.find(intent, { session })
+        const { page, locator, target, checks: checkResults } = await this.find(intent, { session, checks })
         await pace.click(page, locator, pc)
         await pace.settle(page, pc)
-        return { clicked: picked, url: page.url() }
+        return { clicked: target, url: page.url(), checks: checkResults }
     }
 
-    async type(intent, text, { session, pace: p, submit = false } = {}) {
+    async type(intent, text, { session, pace: p, submit = false, checks } = {}) {
         const pc = pace.resolvePace(p || this.pace)
-        const { page, locator, ...picked } = await this.find(intent, { session })
+        const { page, locator, target, checks: checkResults } = await this.find(intent, { session, checks })
         await pace.type(page, locator, text, pc)
         if (submit) { await pace.press(page, 'Enter', pc); await pace.settle(page, pc) }
-        return { typed: picked, chars: text.length }
+        return { typed: target, chars: text.length, checks: checkResults }
     }
 
     async press(key, { session, pace: p } = {}) {
@@ -163,20 +198,15 @@ export class JevBrowser {
         return { scrolled: Number(dy) }
     }
 
-    // Test assertion: Jev noul over the visible page. pass = noul >= threshold,
-    // or with negate (refute) pass = noul < threshold.
-    async check(question, { session, threshold, negate = false } = {}) {
-        threshold = Number(threshold ?? (negate ? 0.3 : 0.7))
+    // Test assertions: Jev nouls over the visible page, all in one request.
+    // pass = noul >= threshold (0.7), or for negate/refute noul < threshold (0.3).
+    async checks(items, { session } = {}) {
         const page = await this.page(session)
-        const state = await pageState(page)
-        const t = Date.now()
-        const { answers } = await ask(state, {
-            check: { type: 'noul', instructions: `Looking at the current page (\`visible_text\`, \`url\`, \`title\`): ${question}` },
-        })
-        const noul = answers.check.noul
-        const ok = negate ? noul < threshold : noul >= threshold
-        await this.hud(page, `Jev noul ${noul.toFixed(2)} ${negate ? '<' : '≥'} ${threshold}  ${ok ? 'PASS ✓' : 'FAIL ✗'}  ${Date.now() - t}ms`)
-        return { question, noul, threshold, negate, pass: negate ? noul < threshold : noul >= threshold, jevMs: Date.now() - t }
+        return (await this.judge(page, { checks: items })).checks
+    }
+
+    async check(question, { session, threshold, negate = false } = {}) {
+        return (await this.checks([{ question, threshold, negate }], { session }))[0]
     }
 
     async snap({ session } = {}) {

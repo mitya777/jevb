@@ -188,6 +188,13 @@ export class JevDevice {
         }])
     }
 
+    async keys(s, text) {
+        await s.wd.actions([{
+            type: 'key', id: 'keyboard',
+            actions: [...text].flatMap((value) => [{ type: 'keyDown', value }, { type: 'keyUp', value }]),
+        }])
+    }
+
     async swipe(s, from, to, ms) {
         await s.wd.actions([{
             type: 'pointer', id: 'finger1', parameters: { pointerType: 'touch' },
@@ -233,13 +240,18 @@ export class JevDevice {
         const { s, el, target, checks: checkResults } = await this.find(intent, { session, checks })
         await this.tap(s, el, pc)
         await sleep(pc === 'human' ? rand(300, 600) : 300) // keyboard comes up
-        const field = await s.wd.activeElement()
-        if (pc === 'agent') await s.wd.sendKeysTo(field, text)
+        // iOS appends each element send. UiAutomator2 replaces the field's text
+        // on each send, so Android types with key events, which insert at the cursor like a
+        // keyboard. Chunks of 1–3 chars with jitter at human pace.
+        const field = s.platform === 'ios' ? await s.wd.activeElement() : null
+        // A tap puts the Android cursor where it lands; type at the end.
+        if (!field) await s.wd.execute('mobile: pressKey', [{ keycode: 123 }]) // KEYCODE_MOVE_END
+        const send = (chunk) => (field ? s.wd.sendKeysTo(field, chunk) : this.keys(s, chunk))
+        if (pc === 'agent') await send(text)
         else {
-            // Chunks of 1–3 chars with typing jitter; each send appends.
             for (let i = 0; i < text.length;) {
                 const n = Math.min(text.length - i, Math.ceil(rand(0, 3)))
-                await s.wd.sendKeysTo(field, text.slice(i, i + n))
+                await send(text.slice(i, i + n))
                 i += n
                 await sleep(rand(60, 180))
             }

@@ -17,6 +17,13 @@ export const OVERLAY = `(() => {
     addEventListener('mousemove', (e) => { c.style.left = e.clientX + 'px'; c.style.top = e.clientY + 'px' }, true)
     addEventListener('mousedown', () => { c.style.transform = 'scale(.6)' }, true)
     addEventListener('mouseup', () => { c.style.transform = '' }, true)
+    window.__jevbDone = (t) => {
+      const d = document.createElement('div'); d.id = '__jevb_done'
+      d.style.cssText = 'position:fixed;left:0;right:0;bottom:0;padding:22px 0 26px;text-align:center;'
+        + 'background:rgba(8,40,24,.94);border-top:4px solid #3EFF9C;color:#3EFF9C;'
+        + 'font:800 72px/1 -apple-system,Helvetica,Arial,sans-serif;letter-spacing:2px;pointer-events:none;z-index:2147483647'
+      d.textContent = t; h.style.display = 'none'; document.documentElement.append(d)
+    }
     window.__jevbHud = (t) => { h.textContent = t; try { sessionStorage.setItem(K, t) } catch {} }
     try { const t = sessionStorage.getItem(K); if (t) h.textContent = t } catch {}
   }

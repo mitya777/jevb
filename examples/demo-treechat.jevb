@@ -8,4 +8,3 @@ type the display name field => jevb demo
 refute is an error or "not found" page shown?
 act go back to the login page
 check is this a login page?
-wait 1500

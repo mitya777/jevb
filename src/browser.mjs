@@ -90,6 +90,12 @@ export class JevBrowser {
         await page.evaluate((t) => window.__jevbHud?.(t), text).catch(() => {})
     }
 
+    async showDone(text, { session } = {}) {
+        if (!this.demo) return
+        const page = await this.page(session).catch(() => null)
+        await page?.evaluate((t) => window.__jevbDone?.(t), text).catch(() => {})
+    }
+
     status() {
         return { browser: this.browser ? 'up' : 'down', pace: this.pace, sessions: [...this.sessions.keys()], idleMs: this.idleMs }
     }

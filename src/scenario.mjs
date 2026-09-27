@@ -31,6 +31,8 @@ export async function runScenario(file, { pace, baseUrl, onStep = console.log } 
     const b = new JevBrowser({ pace, idleMs: 10 * 60_000 })
     const results = []
     let failed = 0
+    const started = Date.now()
+    let lastWorkEnd = started // end of the last non-wait step: trailing waits don't count
     try {
         for (const s of steps) {
             const t = Date.now()
@@ -62,13 +64,19 @@ export async function runScenario(file, { pace, baseUrl, onStep = console.log } 
                 failed++
                 out = { error: e.message, detail: e.detail }
             }
+            if (s.cmd !== 'wait') lastWorkEnd = Date.now()
             const r = { line: s.line, step: s.src, ms: Date.now() - t, ...out }
             results.push(r)
             onStep(r)
             if (out.error) break // later steps depend on page state; stop at first error
         }
+        if (b.demo) {
+            const secs = ((lastWorkEnd - started) / 1000).toFixed(2)
+            await b.showDone(failed ? `FAILED  ${failed}  ·  ${secs}s` : `DONE  ${secs}s`)
+            await new Promise((r) => setTimeout(r, 2500)) // hold the banner for viewers/recordings
+        }
     } finally {
         var { videos } = await b.shutdown('scenario done')
     }
-    return { failed, results, videos }
+    return { failed, results, videos, totalMs: lastWorkEnd - started }
 }

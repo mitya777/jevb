@@ -8,12 +8,16 @@ import * as pace from './pace.mjs'
 import { pageState, shortlist, snapshot } from './snapshot.mjs'
 
 const DEFAULT_IDLE_MS = Number(process.env.JEVB_IDLE_MS || 120_000)
+// Attach to an already-running Chrome (see bin/jevb-chrome.sh) instead of
+// launching Chromium. Sessions become tabs in that Chrome's own profile, so
+// its cookies, sign-ins and Password Manager apply.
+const CDP_URL = process.env.JEVB_CDP_URL || null
 
 export class JevBrowser {
     constructor({ idleMs = DEFAULT_IDLE_MS, pace: p, headless = process.env.JEVB_HEADED !== '1',
         viewport = { width: 1280, height: 800 }, minConfidence = 0.5, log = () => {},
-        demo = process.env.JEVB_DEMO === '1', videoDir = process.env.JEVB_VIDEO || null } = {}) {
-        Object.assign(this, { idleMs, headless, viewport, minConfidence, log, demo, videoDir })
+        demo = process.env.JEVB_DEMO === '1', videoDir = process.env.JEVB_VIDEO || null, cdpUrl = CDP_URL } = {}) {
+        Object.assign(this, { idleMs, headless, viewport, minConfidence, log, demo, videoDir, cdpUrl })
         this.step = ''
         this.jevRequests = 0
         this.jevTokens = { input: 0, output: 0 }
@@ -32,9 +36,11 @@ export class JevBrowser {
         this.launching ||= (async () => {
             const t = Date.now()
             // Prefer the slim headless shell Playwright installs; no Chrome window.
-            const b = await chromium.launch({ headless: this.headless })
-            b.on('disconnected', () => { this.browser = null; this.sessions.clear() })
-            this.log(`chromium up in ${Date.now() - t}ms`)
+            const b = this.cdpUrl
+                ? await chromium.connectOverCDP(this.cdpUrl)
+                : await chromium.launch({ headless: this.headless })
+            b.on('disconnected', () => { this.browser = null; this.sessions.clear(); this.overlayAdded = false })
+            this.log(`${this.cdpUrl ? `attached to ${this.cdpUrl}` : 'chromium up'} in ${Date.now() - t}ms`)
             return b
         })()
         try { this.browser = await this.launching } finally { this.launching = null }
@@ -56,11 +62,13 @@ export class JevBrowser {
         const videos = []
         for (const { context, page } of this.sessions.values()) {
             const v = page.video()
-            await context.close().catch(() => {})
+            // Attached Chrome: close only our tab; its profile context isn't ours.
+            await (this.cdpUrl ? page.close() : context.close()).catch(() => {})
             if (v) videos.push(await v.path().catch(() => null))
         }
         this.sessions.clear()
-        if (b) { await b.close().catch(() => {}); this.log(`chromium down (${reason})`) }
+        // For a CDP-attached browser, close() only disconnects; Chrome keeps running.
+        if (b) { await b.close().catch(() => {}); this.log(`${this.cdpUrl ? 'detached' : 'chromium down'} (${reason})`) }
         for (const v of videos.filter(Boolean)) this.log(`video: ${v}`)
         return { videos: videos.filter(Boolean) }
     }
@@ -74,6 +82,14 @@ export class JevBrowser {
         let s = this.sessions.get(name)
         if (s && !s.page.isClosed()) return s.page
         const browser = await this.ensureBrowser()
+        if (this.cdpUrl) {
+            // A new tab in Chrome's default (profile) context, at its real window size.
+            const context = browser.contexts()[0]
+            if (this.demo && !this.overlayAdded) { await context.addInitScript(OVERLAY); this.overlayAdded = true }
+            s = { context, page: await context.newPage() }
+            this.sessions.set(name, s)
+            return s.page
+        }
         const context = await browser.newContext({
             viewport: this.viewport,
             ...(this.videoDir && { recordVideo: { dir: this.videoDir, size: this.viewport } }),
@@ -211,7 +227,7 @@ export class JevBrowser {
 
     async close({ session = 'default' } = {}) {
         const s = this.sessions.get(session)
-        if (s) { await s.context.close().catch(() => {}); this.sessions.delete(session) }
+        if (s) { await (this.cdpUrl ? s.page.close() : s.context.close()).catch(() => {}); this.sessions.delete(session) }
         if (!this.sessions.size) await this.shutdown('last session closed')
         return { closed: session }
     }

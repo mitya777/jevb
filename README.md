@@ -65,6 +65,14 @@ jevb stop
 ```
 
 Use `--session NAME` for parallel contexts and `JEVB_HEADED=1` to watch.
+
+To test signed-in flows, attach to real Chrome instead of launching Chromium:
+`bin/jevb-chrome.sh` starts Google Chrome with a dedicated profile
+(`~/.jevb/chrome-profile`) and a local DevTools port, then prints
+`JEVB_CDP_URL`. Sign in there once; its cookies and Password Manager persist.
+With `JEVB_CDP_URL` set, sessions are tabs in that profile (no per-session
+isolation or `JEVB_VIDEO`), and idle/stop closes jevb's tabs but leaves
+Chrome running.
 `JEVB_DEMO=1` draws a visible cursor plus a HUD (step, and what Jev picked
 with its confidence). `JEVB_VIDEO=<dir>` records a .webm per session.
 

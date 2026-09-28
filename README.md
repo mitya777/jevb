@@ -168,6 +168,21 @@ jevb run my.jevb --base http://localhost:5174 --pace human
 The runner stops at the first step that throws. It exits non-zero if any
 check fails.
 
+### Secrets
+
+`${NAME}` in a `type` step is filled from the environment, or from `./.env`,
+when the step runs. Credentials therefore live in secrets (`.env`, CI secrets)
+and never in scenario files. Output and videos show the step as written, and
+password fields are masked in what Jev judges. A non-password field's value,
+such as an email, is part of the state that checks send to Jev.
+
+```
+type the email field => ${TREECHAT_EMAIL}
+type the password field => ${TREECHAT_PASSWORD}
+```
+
+An explicit `--pace` overrides `pace` lines in the scenario.
+
 ### Batching
 
 Consecutive `check`/`refute` steps go to Jev as **one request**, since they

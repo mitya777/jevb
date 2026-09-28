@@ -325,6 +325,15 @@ export class JevDevice {
         return s.pageTop
     }
 
+    // A field's current text; null when it can't be read. iOS reports an
+    // empty field's placeholder as its value, so that counts as empty.
+    async fieldValue(s, id, web) {
+        if (web) return s.wd.req('GET', s.wd.s(`/element/${id}/property/value`)).catch(() => null)
+        const [value, placeholder] = await Promise.all(['value', 'placeholderValue'].map((a) =>
+            s.wd.req('GET', s.wd.s(`/element/${id}/attribute/${a}`)).catch(() => null)))
+        return value === placeholder ? '' : value ?? ''
+    }
+
     async webElement(s, el) {
         const found = await s.wd.req('POST', s.wd.s('/element'), { using: 'css selector', value: `[data-jevb="${el.id}"]` })
         return Object.values(found)[0]
@@ -393,6 +402,10 @@ export class JevDevice {
         const field = el.web ? tapped : await s.wd.activeElement()
         const replaces = !el.web && s.platform === 'android'
         const prefix = replaces ? el.value || '' : ''
+        // Password fields read back masked, and their text must never reach a
+        // log: no read-back for them.
+        const secret = /password|secure/i.test(`${el.role} ${el.label}`)
+        const before = replaces || secret ? '' : (await this.fieldValue(s, field, el.web)) ?? ''
         let typed = ''
         const send = (chunk) => { typed += chunk; return s.wd.sendKeysTo(field, replaces ? prefix + typed : chunk) }
         if (pc === 'agent') await send(text)
@@ -402,6 +415,22 @@ export class JevDevice {
                 await send(text.slice(i, i + n))
                 i += n
                 await sleep(rand(60, 180))
+            }
+        }
+        // Read the field back: an iPhone dropped a chunk typed while its
+        // keyboard was still coming up ("jevb demo" -> "jb demo"). If the
+        // value is not what was typed, clear it and enter the text in one go.
+        if (!replaces && !secret) {
+            const expected = before + text
+            let got = await this.fieldValue(s, field, el.web)
+            for (let i = 0; i < 3 && got != null && got !== expected; i++) {
+                await sleep(250) // the reported value can lag the last send
+                got = await this.fieldValue(s, field, el.web)
+            }
+            if (got != null && got !== expected) {
+                this.log(`field read back ${got.length} of ${expected.length} characters; re-entering`)
+                await s.wd.req('POST', s.wd.s(`/element/${field}/clear`), {})
+                await s.wd.sendKeysTo(field, expected)
             }
         }
         // The field's reported value lags the last send; settle so a check

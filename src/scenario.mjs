@@ -46,7 +46,18 @@ const toCheck = (s) => ({ question: s.arg, threshold: s.threshold, negate: s.cmd
 // act/type they join that step's element-choice request too (same page
 // state, and checks describe the page before the action either way).
 // batch:false runs every step on its own, for comparison.
+// ${NAME} in a type step comes from the environment (or ./.env) at run time,
+// so credentials live in secrets, never in scenario files. Results and logs
+// show the step as written (the placeholder), never the value.
+function expand(arg) {
+    return arg.replace(/\$\{([A-Z0-9_]+)\}/g, (_, name) => {
+        if (process.env[name] == null) throw Object.assign(new Error(`${name} is not set (env or ./.env)`), { code: 'MISSING_ENV' })
+        return process.env[name]
+    })
+}
+
 export async function runScenario(file, { pace, baseUrl, batch = true, onStep = console.log, device, app } = {}) {
+    if (fs.existsSync('.env')) { try { process.loadEnvFile('.env') } catch {} }
     const steps = parse(fs.readFileSync(file, 'utf8'))
     const onDevice = !!(device || app) || steps.some((s) => ['device', 'app', 'platform'].includes(s.cmd))
     const b = onDevice ? new JevDevice({ pace, log: (m) => onStep({ log: m }) }) : new JevBrowser({ pace, idleMs: 10 * 60_000 })
@@ -84,7 +95,8 @@ export async function runScenario(file, { pace, baseUrl, batch = true, onStep = 
                     continue
                 }
                 switch (s.cmd) {
-                    case 'pace': b.pace = s.arg; out = { pace: s.arg }; break
+                    // An explicit --pace wins over the scenario's own pace lines.
+                    case 'pace': if (!pace) b.pace = s.arg; out = { pace: b.pace }; break
                     case 'device': case 'app': case 'platform': deviceOpts[s.cmd] = s.arg; out = { [s.cmd]: s.arg }; break
                     case 'open': {
                         const opts = { ...deviceOpts }
@@ -95,7 +107,7 @@ export async function runScenario(file, { pace, baseUrl, batch = true, onStep = 
                     case 'act': out = await b.act(s.arg, { checks }); break
                     case 'type': {
                         const [intent, text] = s.arg.split(/\s*=>\s*/)
-                        out = await b.type(intent, text ?? '', { checks })
+                        out = await b.type(intent, expand(text ?? ''), { checks })
                         break
                     }
                     case 'press': out = await b.press(s.arg); break

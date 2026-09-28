@@ -1,0 +1,18 @@
+# Log in to the Treechat app and look around, on a real phone. The account
+# comes from the environment (or ./.env): TREECHAT_EMAIL, TREECHAT_PASSWORD.
+# Never write credentials in a scenario; results show the ${...} placeholder.
+# Use a dedicated test account. Read-only once logged in: never posts or
+# upvalues.
+#   jevb run examples/login-treechat-app.jevb --device "pixel 9" --app treechat.apk
+open
+act? dismiss the notifications permission prompt without allowing
+check is this a login page?
+type the email field => ${TREECHAT_EMAIL}
+type the password field => ${TREECHAT_PASSWORD}
+press HideKeyboard
+act log in
+refute is an error or "wrong password" message shown?
+check is the user logged in, with a stream of posts shown?
+act open the sidebar menu
+act open the Channels page
+check is a list of channels shown?

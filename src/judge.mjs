@@ -59,10 +59,25 @@ export async function judge({ intent, checks = [], options, state, where }) {
             const sum = near.reduce((acc, [, p]) => acc + p, 0)
             if (near.length > 1 && sum > target.confidence) Object.assign(target, { confidence: +sum.toFixed(3), merged: near.length })
         }
+        // "The first Reply button" is positional: several identical controls
+        // ("Reply", "Reply (1)") split the probability (0.42/0.31/0.24).
+        // When the intent says first/last and the likely options are one kind
+        // of control, take the topmost/bottommost and their combined weight.
+        const order = /\b(first|top(most)?)\b/i.test(intent) ? 1 : /\b(last|bottom(most)?)\b/i.test(intent) ? -1 : 0
+        const kind = (d) => d?.match(/^(\S+) "([^"]*?)(?: \(\d+\))?"/)?.slice(1).join(' ')
+        const likely = Object.entries(a.probabilities || {}).filter(([id, p]) => p >= 0.1 && id !== 'none')
+        if (order && likely.length > 1 && new Set(likely.map(([id]) => kind(criteria[id]))).size === 1 && kind(criteria[likely[0][0]])) {
+            const [pick] = likely.sort(([x], [y]) => order * (at(criteria[x])[1] - at(criteria[y])[1]) || at(criteria[x])[0] - at(criteria[y])[0])[0]
+            const sum = likely.reduce((acc, [, p]) => acc + p, 0)
+            Object.assign(target, { id: pick, desc: criteria[pick], confidence: +sum.toFixed(3), ordinal: order > 0 ? 'first' : 'last' })
+        }
     }
 
     const lines = checkResults.map((c) => `${c.negate ? 'refute' : 'check'} ${c.noul.toFixed(2)} ${c.pass ? 'PASS ✓' : 'FAIL ✗'}  ${c.question}`)
     if (target) lines.push(`picked ${target.desc.replace(/ at \d+,\d+$/, '')}  conf ${target.confidence.toFixed(2)}`)
     const summary = `Jev ${batch} question${batch > 1 ? 's' : ''} · ${requests} parallel request${requests > 1 ? 's' : ''} · ${jevMs}ms\n  ${lines.join('\n  ')}`
-    return { target, checks: checkResults, requests, summary }
+    const usage = [choiceRes, checksRes].reduce((u, r) => ({
+        input: u.input + (r?.usage?.input_tokens || 0), output: u.output + (r?.usage?.output_tokens || 0),
+    }), { input: 0, output: 0 })
+    return { target, checks: checkResults, requests, summary, usage }
 }

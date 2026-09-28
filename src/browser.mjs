@@ -16,6 +16,7 @@ export class JevBrowser {
         Object.assign(this, { idleMs, headless, viewport, minConfidence, log, demo, videoDir })
         this.step = ''
         this.jevRequests = 0
+        this.jevTokens = { input: 0, output: 0 }
         this.pace = pace.resolvePace(p)
         this.browser = null
         this.launching = null
@@ -120,6 +121,8 @@ export class JevBrowser {
             where: async () => ({ url: page.url(), title: await page.title() }),
         })
         this.jevRequests += res.requests
+        this.jevTokens.input += res.usage.input
+        this.jevTokens.output += res.usage.output
         await this.hud(page, res.summary)
         return { target: res.target, checks: res.checks }
     }

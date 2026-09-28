@@ -95,8 +95,8 @@ async function main() {
     if (cmd === 'serve') return (await import('../src/daemon.mjs')).serve()
     if (cmd === 'run') {
         const { runScenario } = await import('../src/scenario.mjs')
-        const { failed, videos, totalMs, jevCalls } = await runScenario(pos[0], { pace: flags.pace, baseUrl: flags.base, batch: !flags['no-batch'], device: flags.device, app: flags.app, onStep: (r) => console.log(JSON.stringify(r)) })
-        console.log(JSON.stringify({ done: true, failed, totalMs, jevCalls, videos }))
+        const { failed, videos, totalMs, jevCalls, jevTokens } = await runScenario(pos[0], { pace: flags.pace, baseUrl: flags.base, batch: !flags['no-batch'], device: flags.device, app: flags.app, onStep: (r) => console.log(JSON.stringify(r)) })
+        console.log(JSON.stringify({ done: true, failed, totalMs, jevCalls, jevTokens, videos }))
         process.exitCode = failed ? 1 : 0
         return
     }

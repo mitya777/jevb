@@ -32,6 +32,7 @@ export class JevDevice {
         this.pace = pace.resolvePace(p)
         this.step = ''
         this.jevRequests = 0
+        this.jevTokens = { input: 0, output: 0 }
         this.demo = false
         this.sessions = new Map() // name -> { wd, platform, screen, remote, web, device }
         this.expired = new Set()
@@ -209,6 +210,8 @@ export class JevDevice {
             where: async () => ({ platform: s.platform, device: s.device, ...(s.webContext && { browser: s.platform === 'ios' ? 'Safari' : 'Chrome', url: await s.wd.currentUrl() }) }),
         })
         this.jevRequests += res.requests
+        this.jevTokens.input += res.usage.input
+        this.jevTokens.output += res.usage.output
         const el = res.target && (snap?.elements || []).find((e) => e.id === res.target.id)
         return { target: res.target, el, checks: res.checks }
     }

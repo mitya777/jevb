@@ -125,5 +125,5 @@ export async function runScenario(file, { pace, baseUrl, batch = true, onStep = 
     } finally {
         var { videos } = await b.shutdown('scenario done')
     }
-    return { failed, results, videos, jevCalls: b.jevRequests, totalMs: lastWorkEnd - started }
+    return { failed, results, videos, jevCalls: b.jevRequests, jevTokens: b.jevTokens, totalMs: lastWorkEnd - started }
 }

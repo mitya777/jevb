@@ -158,7 +158,8 @@ export function readState(maxText) {
             }
             if (modal && modal.contains(document.querySelector('main, [role=main]')) ) modal = null // app shell, not a modal
         }
-        const root = modal || document.body
+        // body can be briefly null while Safari swaps documents (seen on an iOS 18 simulator)
+        const root = modal || document.body || document.documentElement
         let viewport = ''
         const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
         const range = document.createRange()

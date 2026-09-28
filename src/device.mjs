@@ -24,6 +24,23 @@ const DEFAULT_IDLE_MS = Number(process.env.JEVB_DEVICE_IDLE_MS || 180_000)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const rand = (a, b) => a + Math.random() * (b - a)
 
+// In-page scroll for agent pace (self-contained: sent through WebDriver).
+// Same target as the desktop: the tallest scrolling panel if the app scrolls
+// inside one (Treechat's feed does), else the document.
+function scrollPage(to, dy) {
+    const doc = document.scrollingElement
+    let best = null
+    for (const el of document.querySelectorAll('body *')) {
+        if (el.scrollHeight <= el.clientHeight + 50 || el.clientHeight < innerHeight * 0.4) continue
+        const oy = getComputedStyle(el).overflowY
+        if (oy !== 'auto' && oy !== 'scroll') continue
+        if (!best || el.scrollHeight > best.scrollHeight) best = el
+    }
+    const el = !best || (doc.scrollHeight > doc.clientHeight + 50 && doc.scrollHeight >= best.scrollHeight) ? doc : best
+    if (to) el.scrollTo({ top: to === 'end' ? el.scrollHeight : 0, behavior: 'instant' })
+    else el.scrollBy({ top: dy, behavior: 'instant' })
+}
+
 const ANDROID_KEYS = { Enter: 66, Back: 4, Home: 3, Tab: 61, Escape: 111, Backspace: 67, Delete: 67 }
 
 export class JevDevice {
@@ -202,17 +219,21 @@ export class JevDevice {
     }
 
     async judge(s, { intent, checks = [] }) {
-        let snap
+        // One read shared by the choice and the checks (they run in parallel):
+        // each read renumbers the page's elements, so two reads of a changing
+        // page gave the pick an id from one and the lookup the other.
+        let snapP
+        const read = () => (snapP ||= this.read(s))
         const res = await judge({
             intent, checks,
-            options: async () => shortlist((snap ||= await this.read(s)).elements, intent),
-            state: async () => (snap ||= await this.read(s)).state,
+            options: async () => shortlist((await read()).elements, intent),
+            state: async () => (await read()).state,
             where: async () => ({ platform: s.platform, device: s.device, ...(s.webContext && { browser: s.platform === 'ios' ? 'Safari' : 'Chrome', url: await s.wd.currentUrl() }) }),
         })
         this.jevRequests += res.requests
         this.jevTokens.input += res.usage.input
         this.jevTokens.output += res.usage.output
-        const el = res.target && (snap?.elements || []).find((e) => e.id === res.target.id)
+        const el = res.target && ((await snapP)?.elements || []).find((e) => e.id === res.target.id)
         return { target: res.target, el, checks: res.checks }
     }
 
@@ -439,6 +460,14 @@ export class JevDevice {
         const s = this.session(session)
         const { w, h } = s.screen
         const to = ['end', 'bottom'].includes(dy) ? 'end' : dy === 'top' ? 'top' : null
+        // Agent pace on a web page scrolls the page directly, like the desktop
+        // agent pace: a swipe through Device Farm costs ~2.6s on iOS, and the
+        // four scrolls of the phone tour were 75s of a 120s agent run.
+        if (pc === 'agent' && s.webContext) {
+            await s.wd.execute(`(${scrollPage})(arguments[0], arguments[1])`, [to, to ? 0 : Number(dy) * (await s.wd.execute('return innerWidth')) / w])
+            await this.settle(s, pc)
+            return { scrolled: to || Number(dy) }
+        }
         // To the end/top a person flicks (short, fast: the page glides on);
         // for a measured distance they drag.
         const swipeBy = async (dist) => {

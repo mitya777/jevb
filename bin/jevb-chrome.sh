@@ -12,9 +12,23 @@
 #   jevb stop; jevb open https://example.com   # daemon attaches on next start
 set -euo pipefail
 
+# JEVB_* settings from the repo's .env (shell env wins), like the CLI.
+ENV_FILE="$(cd "$(dirname "$0")/.." && pwd)/.env"
+if [[ -f "$ENV_FILE" ]]; then
+    while IFS='=' read -r k v; do
+        v="${v%\"}"; v="${v#\"}"
+        if [[ "$k" =~ ^JEVB_[A-Z_]+$ && -z "${!k:-}" ]]; then export "$k=$v"; fi
+    done < "$ENV_FILE"
+fi
+
 PORT="${JEVB_CDP_PORT:-9333}"
 PROFILE="${JEVB_CHROME_PROFILE:-$HOME/.jevb/chrome-profile}"
 URL="http://127.0.0.1:$PORT"
+# Which Chrome profile inside $PROFILE to start in, e.g. "Profile 1" (see
+# chrome://version → Profile Path). jevb's tabs open in the profile Chrome
+# starts with, so pin it when the folder holds more than one sign-in.
+PROFILE_ARGS=()
+if [[ -n "${JEVB_CHROME_PROFILE_DIR:-}" ]]; then PROFILE_ARGS=(--profile-directory="$JEVB_CHROME_PROFILE_DIR"); fi
 
 if [[ -z "${CHROME:-}" ]]; then
     for c in "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
@@ -34,7 +48,7 @@ if [[ -n "$pid" ]]; then
     echo "already running on $URL" >&2
 else
     mkdir -p "$PROFILE"
-    "$CHROME" --user-data-dir="$PROFILE" --remote-debugging-port="$PORT" \
+    "$CHROME" --user-data-dir="$PROFILE" ${PROFILE_ARGS[@]+"${PROFILE_ARGS[@]}"} --remote-debugging-port="$PORT" \
         --remote-debugging-address=127.0.0.1 --no-first-run --no-default-browser-check \
         >"$PROFILE/../chrome.log" 2>&1 &
     for _ in $(seq 1 50); do

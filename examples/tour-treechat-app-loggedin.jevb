@@ -29,28 +29,29 @@ act? switch the feed back to Now
 act? switch to the Following tab
 act? switch back to the Public tab
 
-# Open a post and come back
+# Open a post and come back. Android's Back button on a post closes the
+# production app (to the phone's home screen), so go back in the app.
 act open the first post in the feed by tapping its text
 check is a single post or conversation thread shown?
-press Back
+act go back to the feed with the back arrow at the top left
 check is the home feed shown?
 scroll 1200
 act open a post by tapping its text
 check is a single post or conversation thread shown?
 scroll 800
-press Back
+act go back to the feed with the back arrow at the top left
 
 # Search
 act open search
 type the search field => ordinals
 press Enter
 check are search results shown?
-press Back
+act go to the Home feed with the house icon in the bottom bar
 
 # Notifications
 act open notifications
 check are notifications shown?
-press Back
+act go to the Home feed with the house icon in the bottom bar
 
 # Sidebar: channels, memes, home
 act open the sidebar menu
@@ -59,7 +60,7 @@ check is a list of channels shown?
 act open the first channel in the list
 check is a channel's stream of posts shown?
 scroll 1200
-press Back
+act go back with the back arrow at the top left
 act open the sidebar menu
 act? open Memes
 check is a page of memes shown?

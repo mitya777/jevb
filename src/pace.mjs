@@ -108,7 +108,7 @@ export async function settle(page, pace) {
 }
 
 // The element that actually scrolls: the tallest overflow container if the
-// app scrolls inside a panel (Treechat's feed does), else the document.
+// app scrolls inside a panel (many feeds do), else the document.
 async function scrollTarget(page) {
     return page.evaluate(() => {
         const doc = document.scrollingElement

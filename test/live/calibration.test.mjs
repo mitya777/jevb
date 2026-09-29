@@ -28,7 +28,8 @@ after(async () => { await b?.shutdown(); await site?.close() })
 const margins = []
 after(() => { if (margins.length) console.log(`\n${margins.map((m) => `  ${m}`).join('\n')}`) })
 
-// intent -> the label jevb should pick (unquoted, as a person would say it)
+// intent -> what jevb should pick (unquoted, as a person would say it):
+// the label, or the start of the whole option (`button "Edit" in "Grace`).
 const PICKS = {
     'controls.html': {
         'open the notifications': 'Notifications',
@@ -50,18 +51,37 @@ const PICKS = {
         'reply to the last post': 'Reply (2)',
         'reply to the second post': 'Reply (1)',
     },
+    // Repeated controls in common layouts: item context + first/last.
+    'layouts.html': {
+        'edit Grace Hopper': 'button "Edit" in "Grace',
+        'edit the last row': 'button "Edit" in "Grace',
+        'hide the story about the spreadsheet': 'a "hide" in "2.',
+        'hide the last story': 'a "hide" in "3.',
+        'download the Globex invoice': 'button "Download" in "Invoice #1002',
+        'download the first invoice': 'button "Download" in "Invoice #1001',
+        'add the red kettle to the cart': 'button "Add to cart" in "Red kettle',
+        "reply to dana's comment": 'a "reply" in "dana',
+        "reply to fay": 'a "reply" in "fay',
+        'remove eggs from the list': 'button "Remove" in "Eggs',
+        'remove the first item': 'button "Remove" in "Milk',
+    },
 }
 
+// Jev's own judgment, not jevb's code (same with every pick strategy tried):
+// with no flag control, Jev takes "hide" as close enough (0.7-0.8).
+const JEV_TODO = { 'layouts.html': { 'flag the last story': null } }
+
 const SKIP = !live && 'set JEVB_LIVE=1 and TYPESAFEAI_API_KEY'
-for (const [page, cases] of Object.entries(PICKS)) {
+for (const [todo, set] of [[false, PICKS], ['Jev maps flag → hide', JEV_TODO]]) for (const [page, cases] of Object.entries(set)) {
     for (const [intent, want] of Object.entries(cases)) {
-        test(`pick on ${page}: ${intent} → ${want ?? 'NO_MATCH'}`, { skip: SKIP }, async () => {
+        test(`pick on ${page}: ${intent} → ${want ?? 'NO_MATCH'}`, { skip: SKIP, todo }, async () => {
             await b.open(site.url(page))
             let got
             try { got = (await b.find(intent)).target } catch (e) { if (e.code !== 'NO_MATCH') throw e; got = { ...e.detail, noMatch: true } }
             const label = got.desc?.match(/^\S+ "([^"]*)"/)?.[1]
-            margins.push(`${(got.confidence ?? 0).toFixed(2)} pick  ${intent} → ${got.noMatch ? 'NO_MATCH' : label}`)
-            if (want === null) assert.ok(got.noMatch, `picked ${label} (${got.confidence})`)
+            margins.push(`${(got.confidence ?? 0).toFixed(2)} pick  ${intent} → ${got.noMatch ? 'NO_MATCH' : got.desc.replace(/ at -?\d+,-?\d+$/, '')}`)
+            if (want === null) assert.ok(got.noMatch, `picked ${got.desc} (${got.confidence})`)
+            else if (/^\S+ "/.test(want)) assert.ok(!got.noMatch && got.desc.startsWith(want), `${got.desc} (${got.confidence}) ${JSON.stringify(got.top)}`)
             else assert.equal(label, want, JSON.stringify(got.top))
         })
     }
@@ -89,3 +109,21 @@ for (const [page, click, question, want] of CHECKS) {
         assert.equal(c.pass, want, `noul ${c.noul}`)
     })
 }
+
+// A real site that isn't Treechat. Expectations come from the page itself
+// (stories change): the hide link of a story named by its title, and the
+// first/last hide link on screen.
+test('Hacker News: hide a story by title, and the first/last on screen', { skip: SKIP }, async () => {
+    await b.open('https://news.ycombinator.com/')
+    const hides = (await b.snap()).elements.filter((e) => /^e\d+ a "hide" in /.test(e) && !/ offscreen /.test(e))
+    assert.ok(hides.length >= 3, 'front page changed shape')
+    const href = (d) => d.match(/href=(\S+)/)[1]
+    const title = hides[2].match(/ in "\d+\. (.*?)(?: \(| \d+ points|"|$)/)?.[1]
+    assert.ok(title, hides[2])
+    const cases = [[`hide the story ${title}`, hides[2]], ['hide the first story', hides[0]], ['hide the last story on screen', hides.at(-1)]]
+    for (const [intent, want] of cases) {
+        const got = (await b.find(intent)).target
+        margins.push(`${got.confidence.toFixed(2)} pick  HN: ${intent} → ${got.desc.slice(0, 70)}`)
+        assert.equal(href(got.desc), href(want), intent)
+    }
+})

@@ -13,7 +13,7 @@ export function collect() {
         '[contenteditable=""]', '[contenteditable=true]', '[onclick]', '[tabindex]:not([tabindex="-1"])',
     ].join(',')
     // Real controls: SELECTOR minus generic focus/onclick containers, which
-    // apps put around whole panels (Treechat's panel root is tabindex=0).
+    // apps put around whole panels (e.g. a tabindex=0 panel root).
     const CONTROL = SELECTOR.split(',').filter((x) => !x.startsWith('[tabindex') && x !== '[onclick]').join(',')
     const clean = (s) => (s || '').replace(/\s+/g, ' ').trim()
     // Form fields labelled by a sibling <div>/<span> instead of <label for>.
@@ -30,7 +30,7 @@ export function collect() {
     }
     // Last resort for an unlabeled icon control (no aria-label, no alt):
     // what a developer would go by. Readable class names (not CSS-module
-    // hashes), a Lucide icon's name, an image's file name. E.g. Treechat's
+    // hashes), a Lucide icon's name, an image's file name. E.g. a
     // mobile menu opener -> "icon: sidebar-button space-icon-comp mark-circle".
     const iconHint = (el) => {
         const words = new Set()
@@ -103,23 +103,41 @@ export function collect() {
         ].filter(Boolean).join(' ')
         out.push({ id, role, label, inView, el, extra })
     }
-    // Controls sharing a label ("Reply" on every post) differ only by where
-    // they are. Name the item each sits in, so "reply to the post about
-    // cats" can be matched: the LARGEST ancestor holding no other control
-    // with that label (the post card; the nearest one with text was
-    // Treechat's action bar, "10K" on every post).
+    // Controls sharing a label ("Reply" on every post, "Edit" on every row)
+    // differ only by where they are. Name the item each one sits in, so
+    // "edit Grace's row" or "reply to the post about cats" can be matched.
+    // Climb to the largest ancestor that holds no other control with this
+    // label. Where the climb stops, the item may be a run of siblings rather
+    // than one element: a title row plus an actions row (Hacker News), a
+    // header plus a body, a comment whose replies nest beside it. Take the
+    // siblings between this control's run and its neighbours'. If content
+    // comes before the first control, items lead with content and the run
+    // ends at the control; otherwise the run starts there.
     const base = (l) => l.replace(/ \(\d+\)$/, '')
     const count = {}
     for (const o of out) count[base(o.label)] = (count[base(o.label)] || 0) + 1
+    const textOf = (n) => (n.nodeType === 3 ? n.textContent : n.innerText || '')
     for (const o of out) {
         let context = ''
         if (o.label && count[base(o.label)] > 1) {
-            const same = new Set(out.filter((x) => x !== o && base(x.label) === base(o.label)).map((x) => x.el))
+            const same = out.filter((x) => x !== o && base(x.label) === base(o.label)).map((x) => x.el)
+            let item = o.el, shared = null
             for (let n = o.el.parentElement, depth = 0; n && n !== document.body && depth < 15; n = n.parentElement, depth++) {
-                if ([...same].some((x) => n.contains(x))) break // spans several items
-                const t = clean(n.innerText.replace(o.el.innerText, ' '))
-                if (t) context = t.replace(/"/g, "'").slice(0, 60)
+                if (same.some((x) => n.contains(x))) { shared = n; break }
+                item = n
             }
+            let run = [item]
+            if (shared) {
+                const kids = [...shared.childNodes].filter((k) => textOf(k).trim() || k === item || (k.nodeType === 1 && k.querySelector?.('[data-jevb]')))
+                const holds = (k) => k === item || (k.nodeType === 1 && same.some((x) => k.contains(x)))
+                const at = kids.indexOf(item), marks = kids.map((k, i) => (holds(k) ? i : -1)).filter((i) => i >= 0)
+                const k0 = marks.indexOf(at)
+                run = marks[0] > 0
+                    ? kids.slice(k0 > 0 ? marks[k0 - 1] + 1 : 0, at + 1) // content leads: run ends at the control
+                    : kids.slice(at, k0 < marks.length - 1 ? marks[k0 + 1] : kids.length) // control leads: run starts at it
+            }
+            const t = clean(run.map(textOf).join(' ').replace(o.el.innerText, ' '))
+            if (t) context = t.replace(/"/g, "'").slice(0, 60)
         }
         o.desc = `${o.role} "${o.label}"${context ? ` in "${context}"` : ''} ${o.extra}`.trim()
     }

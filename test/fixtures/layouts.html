@@ -1,0 +1,60 @@
+<!doctype html><html><head><title>Layouts</title>
+<style>body{font:14px sans-serif;margin:8px} section{margin-bottom:16px} .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px} .card{border:1px solid #ccc;padding:6px} .sub{font-size:11px;color:#666} .kids{margin-left:24px} .row{display:flex;gap:8px}</style>
+</head><body>
+<!-- Common ways a page repeats one control per item. Each control's item
+     text should reach Jev as `in "..."` context (see snapshot test). -->
+
+<!-- 1. Table: one row per item, actions in the last cell. -->
+<section><table>
+  <thead><tr><th>Name</th><th>Email</th><th>Actions</th></tr></thead>
+  <tbody>
+    <tr><td>Ada Lovelace</td><td>ada@example.com</td><td><button>Edit</button></td></tr>
+    <tr><td>Alan Turing</td><td>alan@example.com</td><td><button>Edit</button></td></tr>
+    <tr><td>Grace Hopper</td><td>grace@example.com</td><td><button>Edit</button></td></tr>
+  </tbody>
+</table></section>
+
+<!-- 2. Split rows (Hacker News): the title and its actions are sibling rows. -->
+<section><table><tbody>
+  <tr><td>1.</td><td><a href="#s1">Rust 2.0 released</a></td></tr>
+  <tr><td></td><td class="sub">120 points by ann | <a href="#h1">hide</a> | 40 comments</td></tr>
+  <tr style="height:5px"></tr>
+  <tr><td>2.</td><td><a href="#s2">A history of the spreadsheet</a></td></tr>
+  <tr><td></td><td class="sub">95 points by bob | <a href="#h2">hide</a> | 12 comments</td></tr>
+  <tr style="height:5px"></tr>
+  <tr><td>3.</td><td><a href="#s3">Show HN: a tiny database</a></td></tr>
+  <tr><td></td><td class="sub">60 points by cy | <a href="#h3">hide</a> | 8 comments</td></tr>
+  <tr style="height:5px"></tr>
+</tbody></table></section>
+
+<!-- 3. Split siblings, control FIRST: a header row with the action, then the body. -->
+<section>
+  <div class="row"><b>Invoice #1001</b><button>Download</button></div><div>Acme Corp, $1,200, paid</div>
+  <div class="row"><b>Invoice #1002</b><button>Download</button></div><div>Globex, $860, overdue</div>
+  <div class="row"><b>Invoice #1003</b><button>Download</button></div><div>Initech, $300, draft</div>
+</section>
+
+<!-- 4. Card grid. -->
+<section class="grid">
+  <div class="card"><h3>Blue mug</h3><p>$12</p><button>Add to cart</button></div>
+  <div class="card"><h3>Red kettle</h3><p>$40</p><button>Add to cart</button></div>
+  <div class="card"><h3>Green teapot</h3><p>$25</p><button>Add to cart</button></div>
+</section>
+
+<!-- 5. Nested comment tree: a parent's item contains its children's controls. -->
+<section>
+  <div class="comment"><div><b>dana</b> I think tabs are better.</div><a href="#r1">reply</a>
+    <div class="kids">
+      <div class="comment"><div><b>eli</b> Spaces, always.</div><a href="#r2">reply</a></div>
+      <div class="comment"><div><b>fay</b> Whatever the formatter says.</div><a href="#r3">reply</a></div>
+    </div>
+  </div>
+</section>
+
+<!-- 6. Plain list. -->
+<section><ul>
+  <li>Milk <button>Remove</button></li>
+  <li>Eggs <button>Remove</button></li>
+  <li>Bread <button>Remove</button></li>
+</ul></section>
+</body></html>

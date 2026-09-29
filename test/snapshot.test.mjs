@@ -44,6 +44,31 @@ test('snapshot: controls sharing a label name the item they sit in', async () =>
     ])
 })
 
+test('snapshot: item context across common layouts', async () => {
+    await b.open(site.url('layouts.html'))
+    const inItem = labels(await b.snap()).filter((l) => / in "/.test(l))
+    assert.deepEqual(inItem, [
+        'button "Edit" in "Ada Lovelace ada@example.com"', // table row
+        'button "Edit" in "Alan Turing alan@example.com"',
+        'button "Edit" in "Grace Hopper grace@example.com"',
+        'a "hide" in "1. Rust 2.0 released 120 points by ann | | 40 comments" href=#h1', // title + actions as sibling rows
+        'a "hide" in "2. A history of the spreadsheet 95 points by bob | | 12 comm" href=#h2',
+        'a "hide" in "3. Show HN: a tiny database 60 points by cy | | 8 comments" href=#h3',
+        'button "Download" in "Invoice #1001 Acme Corp, $1,200, paid"', // action in a header, body after it
+        'button "Download" in "Invoice #1002 Globex, $860, overdue"',
+        'button "Download" in "Invoice #1003 Initech, $300, draft"',
+        'button "Add to cart" in "Blue mug $12"', // card grid
+        'button "Add to cart" in "Red kettle $40"',
+        'button "Add to cart" in "Green teapot $25"',
+        'a "reply" in "dana I think tabs are better." href=#r1', // parent comment; its replies nest beside it
+        'a "reply" in "eli Spaces, always." href=#r2',
+        'a "reply" in "fay Whatever the formatter says." href=#r3',
+        'button "Remove" in "Milk"', // list
+        'button "Remove" in "Eggs"',
+        'button "Remove" in "Bread"',
+    ])
+})
+
 test('snapshot: ids are live data-jevb attributes that locate the element', async () => {
     await b.open(site.url('controls.html'))
     const snap = await b.snap()

@@ -143,7 +143,7 @@ export function deviceSnapshot(xml, screen) {
         if (d.desc === d.type) d.desc = ''
         const own = d.editable ? d.desc : d.desc || d.text
         // Web forms label inputs with text just above them, not an accessible
-        // name (Treechat's sign-up in the app's WebView): borrow that text.
+        // name (a sign-up form in an app's WebView): borrow that text.
         const near = d.editable && !d.desc && nearbyLabel(texts, d.rect)
         if (own && !/^(Vertical|Horizontal) scroll bar, \d+ pages?$/.test(own)) texts.push({ node, t: own, rect: d.rect })
         if (d.editable) fields.push({ label: d.desc || d.hint || near || d.id || d.type, value: d.password ? (d.text ? '(filled)' : '(empty)') : d.text })

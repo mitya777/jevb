@@ -69,29 +69,30 @@ test('judge: an icon and its label 2px apart pool their probability', async () =
     assert.equal(res.target.merged, 2)
 })
 
-test('judge: "first"/"last" pick the topmost/bottommost of identical controls', async () => {
-    const replies = opts('button "Reply" at 8,300', 'button "Reply (1)" at 8,100', 'button "Reply (2)" at 8,500')
-    jev.answer(() => ({ target: { choice: 'e3', confidence: 0.42, probabilities: { e3: 0.42, e1: 0.31, e2: 0.24 } } }))
-    const first = await run({ intent: 'click the first Reply button', options: replies })
-    assert.deepEqual([first.target.id, first.target.ordinal, first.target.confidence], ['e2', 'first', 0.97])
-    const last = await run({ intent: 'click the last reply', options: replies })
-    assert.deepEqual([last.target.id, last.target.ordinal], ['e3', 'last'])
-    // Mixed kinds of control: no positional override.
-    const mixed = await run({ intent: 'click the first Reply button', options: opts('button "Reply" at 8,300', 'a "Reply" at 8,100', 'button "Share" at 8,500') })
-    assert.equal(mixed.target.ordinal, undefined)
-})
-
-test('judge: "last" wins even when Jev picks the wrong one and another kind takes a share', async () => {
-    // Measured on real Jev: "reply to the last post" -> the FIRST Reply 0.44, the textarea 0.22.
-    jev.answer(() => ({ target: { choice: 'e2', confidence: 0.35, probabilities: { e2: 0.44, e1: 0.22, none: 0.12, e4: 0.06, e3: 0.05 } } }))
-    const res = await run({ intent: 'reply to the last post', options: opts('textarea "Write a reply..." at 8,98', 'button "Reply" at 8,190', 'button "Reply (1)" at 8,261', 'button "Reply (2)" at 8,332') })
-    assert.deepEqual([res.target.id, res.target.ordinal, res.target.confidence], ['e4', 'last', 0.55])
+test('judge: first/last send repeated controls as ONE option; code picks the position', async () => {
+    const page = opts('textarea "Write a reply..." at 8,98', 'button "Reply (1)" in "cats" at 8,300', 'button "Reply" in "dogs" at 8,100', 'button "Reply (2)" in "owls" at 8,500', 'a "Reply" at 8,600')
+    jev.answer(() => ({ target: { choice: 'e2', confidence: 0.93, probabilities: { e2: 0.93, e1: 0.05 } } }))
+    const last = await run({ intent: 'reply to the last post', options: page })
+    assert.deepEqual(jev.picks()[0].questions.target.criteria, {
+        e1: 'textarea "Write a reply..." at 8,98',
+        e2: 'button "Reply" ×3, one per item, from "cats" to "owls"', // count suffixes dropped; the link "Reply" is another kind
+        e5: 'a "Reply" at 8,600',
+        none: 'No element on the page matches the intent',
+    })
+    assert.deepEqual([last.target.id, last.target.ordinal, last.target.of, last.target.confidence], ['e4', 'last', 3, 0.93])
+    const first = await run({ intent: 'click the first Reply button', options: page })
+    assert.equal(first.target.id, 'e3')
 })
 
 test('judge: "last" means the last one on screen, not one scrolled far below', async () => {
-    jev.answer(() => ({ target: { choice: 'e1', confidence: 0.6, probabilities: { e1: 0.6, e2: 0.3 } } }))
+    jev.answer(() => ({ target: { choice: 'e1', confidence: 0.9, probabilities: { e1: 0.9 } } }))
     const res = await run({ intent: 'click the last Reply', options: opts('button "Reply" at 8,100', 'button "Reply (1)" at 8,400', 'button "Reply (2)" offscreen at 8,4000') })
     assert.equal(res.target.id, 'e2')
+})
+
+test('judge: without first/last every copy is its own option (item context tells them apart)', async () => {
+    await run({ intent: 'reply to the post about cats', options: opts('button "Reply" in "cats" at 8,100', 'button "Reply (1)" in "dogs" at 8,400') })
+    assert.deepEqual(Object.keys(jev.picks()[0].questions.target.criteria), ['e1', 'e2', 'none'])
 })
 
 test('judge: no options is an error before any request', async () => {

@@ -2,7 +2,7 @@
 // backends: an optional element choice for `intent` plus any number of
 // checks (nouls). All checks share one request (same state). The choice goes
 // in its own request, sent at the same time: page text in its state
-// measurably lowers pick confidence (0.94 → ~0.5 on Treechat signup), so the
+// measurably lowers pick confidence (0.94 → ~0.5 on a real sign-up page), so the
 // two never share state. Checks see the screen as it is *before* the action.
 //
 //   options(): elements to choose from, [{ id, desc }] (already shortlisted)
@@ -10,15 +10,45 @@
 //   where():   small context for the choice (url/title, or app/screen)
 import { ask } from './jev.mjs'
 
+const at = (d) => d?.match(/ at (-?\d+),(-?\d+)$/)?.slice(1).map(Number)
+// Kind of control: role + label without a count suffix ("Reply (3)").
+const kind = (d) => d?.match(/^(\S+) "([^"]*?)(?: \(\d+\))?"/)?.slice(1).join(' ')
+
+// One option standing for repeated controls, with the span of items they
+// sit in so Jev knows what they act on ("Reply" on posts, not the reply box).
+function groupDesc(ds) {
+    const [role, label] = ds[0].match(/^(\S+) "([^"]*?)(?: \(\d+\))?"/).slice(1)
+    const item = (d) => d.match(/ in "([^"]*)"/)?.[1]
+    const [first, last] = [item(ds[0]), item(ds.at(-1))]
+    return `${role} "${label}" ×${ds.length}, one per item${first && last ? `, from "${first}" to "${last}"` : ''}`
+}
+
 export async function judge({ intent, checks = [], options, state, where }) {
-    let criteria
+    let criteria, descs, groups = {}
+    // "The last Reply", "hide the first story": positional intents ask two
+    // things. Which kind of control is Jev's call; which one is position.
+    // Repeated controls (same role and label) go to Jev as ONE option, and
+    // code takes the topmost/bottommost on screen. Asked per control, Jev
+    // split the weight across copies (0.42/0.31/0.24), spread it onto
+    // titles and "none" (0.21 in total on Hacker News), or took the first
+    // copy for "the last post".
+    const order = intent && (/\b(first|top(most)?)\b/i.test(intent) ? 1 : /\b(last|bottom(most)?)\b/i.test(intent) ? -1 : 0)
     const choiceReq = intent && (async () => {
         const opts = await options()
         if (!opts.length) throw Object.assign(new Error('no interactive elements on screen'), { code: 'NO_ELEMENTS' })
-        criteria = Object.fromEntries(opts.map((e) => [e.id, e.desc]))
+        descs = Object.fromEntries(opts.map((e) => [e.id, e.desc]))
+        if (order) {
+            const byKind = {}
+            for (const e of opts) { const k = kind(e.desc); if (k && at(e.desc)) (byKind[k] ||= []).push(e.id) }
+            for (const ids of Object.values(byKind)) if (ids.length > 1) groups[ids[0]] = ids
+        }
+        const hidden = new Set(Object.values(groups).flatMap((ids) => ids.slice(1)))
+        criteria = Object.fromEntries(opts.filter((e) => !hidden.has(e.id)).map((e) => [e.id,
+            groups[e.id] ? groupDesc(groups[e.id].map((id) => descs[id])) : e.desc]))
         criteria.none = 'No element on the page matches the intent'
         return ask({ intent, page: await where() },
-            { target: { type: 'choice', instructions: 'Which page element should a user interact with to accomplish `intent`?', criteria } })
+            { target: { type: 'choice', criteria, instructions: 'Which page element should a user interact with to accomplish `intent`?'
+                + (Object.keys(groups).length ? ' An option marked ×N stands for N identical controls, one per item; choose it if the intent means that kind of control. Which one (first/last) is resolved by position afterwards.' : '') } })
     })()
     let seen
     const checksReq = checks.length && (async () => ask(seen = await state(), Object.fromEntries(checks.map((c, i) => [
@@ -49,7 +79,6 @@ export async function judge({ intent, checks = [], options, state, where }) {
         // An icon and its label often sit on one control ("icon: home" and
         // "Home", 2px apart) and split Jev's probability below the bar
         // (0.40 + 0.38). Options within 24px of the pick count as the pick.
-        const at = (d) => d?.match(/ at (-?\d+),(-?\d+)$/)?.slice(1).map(Number)
         const p0 = a.choice !== 'none' && at(criteria[a.choice])
         if (p0) {
             const near = Object.entries(a.probabilities || {}).filter(([id]) => {
@@ -59,24 +88,12 @@ export async function judge({ intent, checks = [], options, state, where }) {
             const sum = near.reduce((acc, [, p]) => acc + p, 0)
             if (near.length > 1 && sum > target.confidence) Object.assign(target, { confidence: +sum.toFixed(3), merged: near.length })
         }
-        // "The first Reply button" / "reply to the last post" are positional:
-        // identical controls ("Reply", "Reply (1)") split the probability
-        // (0.42/0.31/0.24), or Jev just takes the first one it sees (it picked
-        // the top Reply for "the last post"). When the intent says first/last,
-        // take the topmost/bottommost on-screen control of the same kind as
-        // Jev's likeliest option, with their combined weight. Other kinds are
-        // ignored: the "Write a reply" box taking 0.2 used to block this.
-        const order = /\b(first|top(most)?)\b/i.test(intent) ? 1 : /\b(last|bottom(most)?)\b/i.test(intent) ? -1 : 0
-        const kind = (d) => d?.match(/^(\S+) "([^"]*?)(?: \(\d+\))?"/)?.slice(1).join(' ')
-        const probs = a.probabilities || {}
-        const [anchor] = Object.entries(probs).filter(([id]) => id !== 'none' && at(criteria[id])).sort((x, y) => y[1] - x[1])[0] || []
-        const k = anchor && kind(criteria[anchor])
-        let peers = k ? Object.keys(criteria).filter((id) => kind(criteria[id]) === k && at(criteria[id])) : []
-        if (peers.some((id) => !/ offscreen /.test(criteria[id]))) peers = peers.filter((id) => !/ offscreen /.test(criteria[id]))
-        if (order && peers.length > 1) {
-            const [pick] = peers.sort((x, y) => order * (at(criteria[x])[1] - at(criteria[y])[1]) || at(criteria[x])[0] - at(criteria[y])[0])
-            const sum = peers.reduce((acc, id) => acc + (probs[id] || 0), 0)
-            Object.assign(target, { id: pick, desc: criteria[pick], confidence: +Math.max(sum, pick === a.choice ? a.confidence : 0).toFixed(3), ordinal: order > 0 ? 'first' : 'last' })
+        const members = groups[a.choice]
+        if (members) {
+            const shown = members.filter((id) => !/ offscreen /.test(descs[id]))
+            const [pick] = (shown.length ? shown : members)
+                .sort((x, y) => order * (at(descs[x])[1] - at(descs[y])[1]) || at(descs[x])[0] - at(descs[y])[0])
+            Object.assign(target, { id: pick, desc: descs[pick], ordinal: order > 0 ? 'first' : 'last', of: members.length })
         }
     }
 

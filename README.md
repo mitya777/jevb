@@ -181,6 +181,21 @@ overrides any single answer.
 drift in `jev-latest` shows up before a case flips. Known weak spots run as
 TODO and don't fail the suite.
 
+`test/fixtures/layouts.html` covers the common ways a page repeats one control
+per item: table rows, title and actions in sibling rows (Hacker News), an
+action in a header followed by the body, card grids, nested comment threads and
+lists. `test:live` also runs a Hacker News case, so the suite isn't measured
+only on the app jevb was first built for.
+
+### How repeated controls are picked
+
+When several controls share a label ("Reply", "Edit", "hide"), each option
+names the item it belongs to: `button "Edit" in "Grace Hopper grace@…"`.
+Intents that say first/last ("edit the last row") send the copies to Jev as
+**one** option, `button "Edit" ×3, one per item, from "Ada…" to "Grace…"`. Jev
+judges which *kind* of control the intent means, and jevb picks the
+topmost/bottommost copy on screen.
+
 ## Scenarios (for tests)
 
 ```

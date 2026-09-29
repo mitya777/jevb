@@ -6,7 +6,7 @@
 // Apps are read from the native accessibility tree (NATIVE_APP context).
 // Mobile web (Safari/Chrome on the device) is read from the page itself,
 // with the same in-page snapshot the desktop browser uses: a long page's
-// native tree is slow to build (a Treechat stream took 44s on an iPhone)
+// native tree is slow to build (a busy feed page took 44s on an iPhone)
 // and can't tell hidden elements from shown ones cheaply. Gestures and
 // screenshots stay native.
 import fs from 'node:fs'
@@ -28,7 +28,7 @@ const rand = (a, b) => a + Math.random() * (b - a)
 
 // In-page scroll for agent pace (self-contained: sent through WebDriver).
 // Same target as the desktop: the tallest scrolling panel if the app scrolls
-// inside one (Treechat's feed does), else the document.
+// inside one (many feeds do), else the document.
 function scrollPage(to, dy) {
     const doc = document.scrollingElement
     let best = null
@@ -153,7 +153,7 @@ export class JevDevice {
         const r = await wd.windowRect()
         s.screen = { w: r.width, h: r.height }
         // XCUITest waits for the app to go idle and for animations to cool
-        // off around each gesture; a live web page never does (a Treechat
+        // off around each gesture; a live web page never does (a busy
         // stream swipe took 28s, 2.6s without). jevb settles on its own.
         if (web && ios) await wd.req('POST', wd.s('/appium/settings'), { settings: { waitForIdleTimeout: 0, animationCoolOffTimeout: 0, waitForQuiescence: false } })
         if (s.webContext) await wd.context(s.webContext)

@@ -16,7 +16,10 @@ export function apiKey() {
 }
 
 export async function ask(state, questions, { retries = 4 } = {}) {
-    const body = JSON.stringify({ model: model(), state, questions })
+    // Screen text is cut to length (labels 100 chars, viewport 6000), and a cut
+    // can split an emoji's surrogate pair; Jev rejects the lone half with
+    // 400 "invalid Unicode text" (a logged-in feed did). Repair every string.
+    const body = JSON.stringify({ model: model(), state, questions }, (k, v) => (typeof v === 'string' ? v.toWellFormed() : v))
     for (let attempt = 0; ; attempt++) {
         const res = await fetch(endpoint(), {
             method: 'POST',

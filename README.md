@@ -128,6 +128,15 @@ can infer what a control does. An icon captioner (OmniParser) that only sees
 the icon could not: it called the same logo "a tree or plant growth
 indicator". The durable fix is still an accessible name in the app.
 
+Controls missing from the tree entirely (a clickable div with no role, which
+Android doesn't expose) can't be named, so as a last resort jevb asks Claude
+Sonnet 5 with the computer-use toolset where on the screenshot to tap, and
+taps there (target `visual`). It runs only when the tree and Haiku found
+nothing. It costs about 6k tokens (~1-2 cents) and takes 1.5-4s. Its trained click
+coordinates hit 4 of 5 test targets, including Treechat's unlabeled menu
+button. Asking a model for "x,y" in plain text was off by 100px or more.
+Haiku 4.5 has no computer use. Set `JEVB_LOCATE_MODEL` to use another model.
+
 In scenarios:
 
 ```

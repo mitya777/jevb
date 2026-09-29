@@ -1,0 +1,26 @@
+<!doctype html><html><head><title>Flow</title><style>body{font:16px sans-serif}</style></head><body>
+<h1>Thread</h1>
+<div id="feed"></div>
+<textarea placeholder="Write a reply..."></textarea>
+<button id="post">Post reply</button>
+<div id="replies">
+  <div><p>First post</p><button>Reply</button></div>
+  <div><p>Second post</p><button>Reply (1)</button></div>
+  <div><p>Third post</p><button>Reply (2)</button></div>
+</div>
+<p id="replied"></p>
+<!-- Navigates a beat after the click, like an analytics call before routing. -->
+<button id="later">Continue to next page</button>
+<script>
+setTimeout(() => { document.getElementById('feed').textContent = 'Loaded feed' }, 500) // SPA renders after load
+document.getElementById('post').onclick = () => {
+  const t = document.querySelector('textarea')
+  const p = document.createElement('p'); p.textContent = 'Posted: ' + t.value
+  document.getElementById('feed').append(p); t.value = ''
+}
+document.querySelectorAll('#replies button').forEach((b) => b.onclick = () => {
+  document.getElementById('replied').textContent = 'Replying to ' + b.previousElementSibling.textContent
+})
+document.getElementById('later').onclick = () => setTimeout(() => { location.href = '/slow/300/next.html' }, 400)
+</script>
+</body></html>

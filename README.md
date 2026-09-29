@@ -128,6 +128,15 @@ can infer what a control does. An icon captioner (OmniParser) that only sees
 the icon could not: it called the same logo "a tree or plant growth
 indicator". The durable fix is still an accessible name in the app.
 
+Controls missing from the tree entirely (a clickable div with no role, which
+Android doesn't expose) can't be named, so as a last resort jevb asks Claude
+Sonnet 5 with the computer-use toolset where on the screenshot to tap, and
+taps there (target `visual`). It runs only when the tree and Haiku found
+nothing. It costs about 6k tokens (~1-2 cents) and takes 1.5-4s. Its trained click
+coordinates hit 4 of 5 test targets, including Treechat's unlabeled menu
+button. Asking a model for "x,y" in plain text was off by 100px or more.
+Haiku 4.5 has no computer use. Set `JEVB_LOCATE_MODEL` to use another model.
+
 In scenarios:
 
 ```
@@ -157,6 +166,45 @@ Things specific to phones:
 
 `JEVB_APPIUM_URL=http://127.0.0.1:4723` (plus `JEVB_APPIUM_UDID`) uses a local
 Appium server instead: a simulator, an emulator or a USB phone, at no cost.
+
+## Testing jevb itself
+
+```bash
+npm test            # offline, ~25s: real headless Chromium + a fake Jev, no key, no cost
+npm run test:live   # the same fixture pages judged by the real Jev (needs TYPESAFEAI_API_KEY)
+```
+
+`test/harness` starts two local servers. One serves the fixture pages in
+`test/fixtures`, whose cases include modals, pointer-div rows, icon-only
+buttons, covered and offscreen controls, and delayed renders and navigations.
+The other is a fake Jev that answers deterministically and records every
+request, so tests can assert what jevb sent: the pick request carries no page
+text, checks see no offscreen text, and passwords are masked.
+
+With the fake, a `"quoted label"` in an intent pins the pick. For example,
+`act click the last "Reply" button` picks a button labelled Reply. For checks,
+every quoted phrase in the question must be on screen. `jev.answer(fn)`
+overrides any single answer.
+
+`test:live` prints each case's confidence (noul) next to its threshold, so a
+drift in `jev-latest` shows up before a case flips. Known weak spots run as
+TODO and don't fail the suite.
+
+`test/fixtures/layouts.html` covers the common ways a page repeats one control
+per item: table rows, title and actions in sibling rows (Hacker News), an
+action in a header followed by the body, card grids, nested comment threads and
+lists. `test:live` also runs a Hacker News case, so the suite isn't measured
+only on the app jevb was first built for.
+
+### How repeated controls are picked
+
+When several controls share a label ("Reply", "Edit", "hide"), each option
+names the item it belongs to: `button "Edit" in "Grace Hopper grace@…"`.
+The same rule runs on native app screens, over the accessibility tree.
+Intents that say first/last ("edit the last row") send the copies to Jev as
+**one** option, `button "Edit" ×3, one per item, from "Ada…" to "Grace…"`. Jev
+judges which *kind* of control the intent means, and jevb picks the
+topmost/bottommost copy on screen.
 
 ## Scenarios (for tests)
 

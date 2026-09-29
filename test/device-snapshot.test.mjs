@@ -104,3 +104,65 @@ test('ios: an empty field reporting its placeholder as value is empty', () => {
     const { state } = deviceSnapshot(xml, { w: 393, h: 852 })
     assert.deepEqual(state.fields, [{ label: '8 character minimum', value: '(empty)' }])
 })
+
+// Repeated controls on native screens get the item they sit in, like web
+// pages: a React Native feed (one ViewGroup per post) on Android, and on iOS
+// a nested thread (replies beside the parent's controls) plus a settings-style
+// list where the title and the action are sibling rows.
+const ANDROID_FEED = `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<hierarchy rotation="0" width="1080" height="2400">
+  <androidx.recyclerview.widget.RecyclerView class="androidx.recyclerview.widget.RecyclerView" text="" clickable="false" enabled="true" displayed="true" bounds="[0,200][1080,2400]">
+    <android.view.ViewGroup class="android.view.ViewGroup" text="" clickable="false" enabled="true" displayed="true" bounds="[0,200][1080,600]">
+      <android.widget.TextView class="android.widget.TextView" text="ann" clickable="false" enabled="true" displayed="true" bounds="[40,220][300,270]" />
+      <android.widget.TextView class="android.widget.TextView" text="Tabs are better" clickable="false" enabled="true" displayed="true" bounds="[40,280][900,340]" />
+      <android.view.ViewGroup class="android.view.ViewGroup" content-desc="Reply" text="" clickable="true" enabled="true" displayed="true" bounds="[40,480][200,560]" />
+    </android.view.ViewGroup>
+    <android.view.ViewGroup class="android.view.ViewGroup" text="" clickable="false" enabled="true" displayed="true" bounds="[0,600][1080,1000]">
+      <android.widget.TextView class="android.widget.TextView" text="bob" clickable="false" enabled="true" displayed="true" bounds="[40,620][300,670]" />
+      <android.widget.TextView class="android.widget.TextView" text="Spaces, always" clickable="false" enabled="true" displayed="true" bounds="[40,680][900,740]" />
+      <android.view.ViewGroup class="android.view.ViewGroup" content-desc="Reply" text="" clickable="true" enabled="true" displayed="true" bounds="[40,880][200,960]" />
+    </android.view.ViewGroup>
+    <android.view.ViewGroup class="android.view.ViewGroup" text="" clickable="false" enabled="true" displayed="true" bounds="[0,3000][1080,3400]">
+      <android.widget.TextView class="android.widget.TextView" text="cy" clickable="false" enabled="true" displayed="true" bounds="[40,3020][300,3070]" />
+      <android.view.ViewGroup class="android.view.ViewGroup" content-desc="Reply" text="" clickable="true" enabled="true" displayed="true" bounds="[40,3280][200,3360]" />
+    </android.view.ViewGroup>
+  </androidx.recyclerview.widget.RecyclerView>
+</hierarchy>`
+
+test('android: a feed row names the post each Reply belongs to', () => {
+    const { elements } = deviceSnapshot(ANDROID_FEED, { w: 1080, h: 2400 })
+    assert.deepEqual(elements.map((e) => e.desc), [
+        'clickable "Reply" in "ann Tabs are better" at 120,520',
+        'clickable "Reply" in "bob Spaces, always" at 120,920',
+    ]) // the third post is offscreen: not offered, and its text isn't borrowed
+})
+
+const el = (type, attrs, kids = '') => `<XCUIElementType${type} type="XCUIElementType${type}" enabled="true" visible="true" ${attrs}>${kids}</XCUIElementType${type}>`
+const IOS_THREAD = `<AppiumAUT>${el('Application', 'x="0" y="0" width="393" height="852"',
+    el('Other', 'accessible="false" x="0" y="100" width="393" height="400"',
+        el('StaticText', 'value="dana" name="dana" label="dana" accessible="true" x="16" y="110" width="80" height="20"')
+        + el('StaticText', 'value="Tabs or spaces?" name="Tabs or spaces?" label="Tabs or spaces?" accessible="true" x="16" y="135" width="300" height="20"')
+        + el('Button', 'name="Reply" label="Reply" accessible="true" x="16" y="160" width="60" height="30"')
+        + el('Other', 'accessible="false" x="24" y="200" width="369" height="300"',
+            el('Other', 'accessible="false" x="24" y="200" width="369" height="100"',
+                el('StaticText', 'value="eli: Spaces" name="eli: Spaces" label="eli: Spaces" accessible="true" x="32" y="210" width="200" height="20"')
+                + el('Button', 'name="Reply" label="Reply" accessible="true" x="32" y="240" width="60" height="30"'))
+            + el('Other', 'accessible="false" x="24" y="300" width="369" height="100"',
+                el('StaticText', 'value="fay: Tabs" name="fay: Tabs" label="fay: Tabs" accessible="true" x="32" y="310" width="200" height="20"')
+                + el('Button', 'name="Reply" label="Reply" accessible="true" x="32" y="340" width="60" height="30"'))))
+    + el('Other', 'accessible="false" x="0" y="520" width="393" height="300"',
+        el('Other', 'accessible="false" name="Wi-Fi" label="Wi-Fi" x="0" y="520" width="393" height="44"')
+        + el('Other', 'accessible="false" x="0" y="564" width="393" height="44"', el('Button', 'name="Remove" label="Remove" accessible="true" x="300" y="570" width="80" height="30"'))
+        + el('Other', 'accessible="false" name="Bluetooth" label="Bluetooth" x="0" y="620" width="393" height="44"')
+        + el('Other', 'accessible="false" x="0" y="664" width="393" height="44"', el('Button', 'name="Remove" label="Remove" accessible="true" x="300" y="670" width="80" height="30"'))))}</AppiumAUT>`
+
+test('ios: nested replies and title/action sibling rows get their item', () => {
+    const { elements } = deviceSnapshot(IOS_THREAD, { w: 393, h: 852 })
+    assert.deepEqual(elements.filter((e) => /Reply|Remove/.test(e.label)).map((e) => e.desc), [
+        'button "Reply" in "dana Tabs or spaces?" at 46,175', // the parent: its replies nest beside it
+        'button "Reply" in "eli: Spaces" at 62,255',
+        'button "Reply" in "fay: Tabs" at 62,355',
+        'button "Remove" in "Wi-Fi" at 340,585', // title row, then its action row
+        'button "Remove" in "Bluetooth" at 340,685',
+    ])
+})

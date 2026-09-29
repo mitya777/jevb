@@ -2,8 +2,9 @@
 // choice / score) over a JSON `state` in ~100ms; code owns control flow.
 import fs from 'node:fs'
 
-const ENDPOINT = process.env.TYPESAFE_ENDPOINT || 'https://api.typesafe.ai/v1/systemone'
-const MODEL = process.env.JEV_MODEL || 'jev-latest'
+// Read per call, so tests can point jevb at a fake Jev (test/harness).
+const endpoint = () => process.env.TYPESAFE_ENDPOINT || 'https://api.typesafe.ai/v1/systemone'
+const model = () => process.env.JEV_MODEL || 'jev-latest'
 
 export function apiKey() {
     if (!process.env.TYPESAFEAI_API_KEY && fs.existsSync('.env')) {
@@ -15,9 +16,12 @@ export function apiKey() {
 }
 
 export async function ask(state, questions, { retries = 4 } = {}) {
-    const body = JSON.stringify({ model: MODEL, state, questions })
+    // Screen text is cut to length (labels 100 chars, viewport 6000), and a cut
+    // can split an emoji's surrogate pair; Jev rejects the lone half with
+    // 400 "invalid Unicode text" (a logged-in feed did). Repair every string.
+    const body = JSON.stringify({ model: model(), state, questions }, (k, v) => (typeof v === 'string' ? v.toWellFormed() : v))
     for (let attempt = 0; ; attempt++) {
-        const res = await fetch(ENDPOINT, {
+        const res = await fetch(endpoint(), {
             method: 'POST',
             headers: { Authorization: `Bearer ${apiKey()}`, 'Content-Type': 'application/json' },
             body,

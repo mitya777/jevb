@@ -143,7 +143,7 @@ export function deviceSnapshot(xml, screen) {
         if (d.desc === d.type) d.desc = ''
         const own = d.editable ? d.desc : d.desc || d.text
         // Web forms label inputs with text just above them, not an accessible
-        // name (Treechat's sign-up in the app's WebView): borrow that text.
+        // name (a sign-up form in an app's WebView): borrow that text.
         const near = d.editable && !d.desc && nearbyLabel(texts, d.rect)
         if (own && !/^(Vertical|Horizontal) scroll bar, \d+ pages?$/.test(own)) texts.push({ node, t: own, rect: d.rect })
         if (d.editable) fields.push({ label: d.desc || d.hint || near || d.id || d.type, value: d.password ? (d.text ? '(filled)' : '(empty)') : d.text })
@@ -168,14 +168,57 @@ export function deviceSnapshot(xml, screen) {
         elements.push({ id, role, label, inView: true, x, y, rect: r, editable: d.editable, value: d.editable && !d.password ? d.text : '', node, desc: `${role} "${label}" ${extra}`.trim() })
     }
     // With an alert/sheet up, only it is "shown" and only it is tappable.
-    const within = (node, anc) => { for (let p = node; p; p = p.parent) if (p === anc) return true; return false }
     const shownEls = dialog ? elements.filter((e) => within(e.node, dialog)) : elements
+    itemContext(shownEls, texts)
     const shownText = (dialog ? texts.filter((t) => within(t.node, dialog)) : texts).map((t) => t.t)
     const dedup = shownText.filter((t, i) => t !== shownText[i - 1])
     return {
         platform,
         elements: shownEls.map(({ node, ...e }) => e),
         state: { viewport_text: dedup.join('\n').slice(0, 6000), fields, modal_open: !!dialog, keyboard_open: keyboard },
+    }
+}
+
+const within = (node, anc) => { for (let p = node; p; p = p.parent) if (p === anc) return true; return false }
+
+// Controls sharing a label ("Reply" on every post) get the item they sit in,
+// as on web pages (see collect() in snapshot.mjs, same rule over the native
+// tree): climb to the largest ancestor holding no other control with that
+// label; where the climb stops, the item may be a run of siblings (a title
+// row, then an actions row), taken up to the neighbouring controls' runs.
+// Item text is the visible on-screen text inside it, minus the control's own.
+function itemContext(elements, texts) {
+    const base = (l) => l.replace(/ \(\d+\)$/, '')
+    const count = {}
+    for (const e of elements) count[base(e.label)] = (count[base(e.label)] || 0) + 1
+    const textIn = (nodes, skip) => {
+        const out = []
+        for (const t of texts) {
+            if (within(t.node, skip) || !nodes.some((n) => within(t.node, n))) continue
+            if (!out.includes(t.t) && !out.some((o) => o.includes(t.t))) out.push(t.t) // iOS repeats child text in parent labels
+        }
+        return out.join(' ')
+    }
+    for (const e of elements) {
+        if (!e.label || count[base(e.label)] < 2) continue
+        const same = elements.filter((x) => x !== e && base(x.label) === base(e.label)).map((x) => x.node)
+        let item = e.node, shared = null
+        for (let n = e.node.parent; n && n.tag !== '#root'; n = n.parent) {
+            if (same.some((x) => within(x, n))) { shared = n; break }
+            item = n
+        }
+        let run = [item]
+        if (shared) {
+            const holds = (k) => k === item || same.some((x) => within(x, k))
+            const kids = shared.children.filter((k) => holds(k) || textIn([k], null))
+            const at = kids.indexOf(item), marks = kids.map((k, i) => (holds(k) ? i : -1)).filter((i) => i >= 0)
+            const k0 = marks.indexOf(at)
+            run = marks[0] > 0
+                ? kids.slice(k0 > 0 ? marks[k0 - 1] + 1 : 0, at + 1) // content leads: run ends at the control
+                : kids.slice(at, k0 < marks.length - 1 ? marks[k0 + 1] : kids.length) // control leads: run starts at it
+        }
+        const t = clean(textIn(run, e.node)).replace(/"/g, "'").slice(0, 60)
+        if (t) e.desc = e.desc.replace(/^(\S+ "[^"]*")/, `$1 in "${t}"`)
     }
 }
 

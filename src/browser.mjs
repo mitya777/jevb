@@ -5,6 +5,7 @@ import { chromium } from 'playwright-core'
 import { OVERLAY } from './demo.mjs'
 import { judge } from './judge.mjs'
 import * as pace from './pace.mjs'
+import { ACTIONS, trackBusy } from './idle.mjs'
 import { pageState, shortlist, snapshot } from './snapshot.mjs'
 
 const DEFAULT_IDLE_MS = Number(process.env.JEVB_IDLE_MS || 120_000)
@@ -29,6 +30,7 @@ export class JevBrowser {
         // Sessions killed by idle shutdown. Acting on one (other than open)
         // throws, so a check can't silently "pass" against a blank page.
         this.expired = new Set()
+        trackBusy(this, ACTIONS)
     }
 
     async ensureBrowser() {
@@ -49,7 +51,7 @@ export class JevBrowser {
 
     touch() {
         clearTimeout(this.idleTimer)
-        this.idleTimer = setTimeout(() => this.shutdown('idle'), this.idleMs)
+        this.idleTimer = setTimeout(() => (this.busy ? this.touch() : this.shutdown('idle')), this.idleMs)
         this.idleTimer.unref?.()
     }
 

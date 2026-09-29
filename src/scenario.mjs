@@ -15,7 +15,7 @@
 // pick what the next `open` starts; `open` with no url launches the app.
 //
 //   device pixel 8                  # or: device iphone 15
-//   app build/treechat.apk          # .apk/.ipa, https/s3 url, upload ARN, or bundle id
+//   app build/app.apk               # .apk/.ipa, https/s3 url, upload ARN, or bundle id
 //   open                            # launch the app (or `open <url>` for mobile web)
 //   act? dismiss the notifications prompt   # `act?`: no match is skipped, not a failure
 //

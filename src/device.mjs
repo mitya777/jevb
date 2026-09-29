@@ -6,7 +6,7 @@
 // Apps are read from the native accessibility tree (NATIVE_APP context).
 // Mobile web (Safari/Chrome on the device) is read from the page itself,
 // with the same in-page snapshot the desktop browser uses: a long page's
-// native tree is slow to build (a Treechat stream took 44s on an iPhone)
+// native tree is slow to build (a busy feed page took 44s on an iPhone)
 // and can't tell hidden elements from shown ones cheaply. Gestures and
 // screenshots stay native.
 import fs from 'node:fs'
@@ -15,8 +15,9 @@ import { deviceSnapshot, shortlist } from './device-snapshot.mjs'
 import { collect, readState } from './snapshot.mjs'
 import { startSession } from './devicefarm.mjs'
 import { judge } from './judge.mjs'
-import { labelControls, labelerEnabled } from './labeler.mjs'
+import { labelControls, labelerEnabled, locateControl } from './labeler.mjs'
 import * as pace from './pace.mjs'
+import { ACTIONS, trackBusy } from './idle.mjs'
 import { WebDriver } from './webdriver.mjs'
 
 // Short by default: an idle device is still billed. Device Farm itself ends
@@ -27,7 +28,7 @@ const rand = (a, b) => a + Math.random() * (b - a)
 
 // In-page scroll for agent pace (self-contained: sent through WebDriver).
 // Same target as the desktop: the tallest scrolling panel if the app scrolls
-// inside one (Treechat's feed does), else the document.
+// inside one (many feeds do), else the document.
 function scrollPage(to, dy) {
     const doc = document.scrollingElement
     let best = null
@@ -58,11 +59,12 @@ export class JevDevice {
         this.sessions = new Map() // name -> { wd, platform, screen, remote, web, device }
         this.expired = new Set()
         this.idleTimer = null
+        trackBusy(this, ACTIONS)
     }
 
     touch() {
         clearTimeout(this.idleTimer)
-        this.idleTimer = setTimeout(() => this.shutdown('idle'), this.idleMs)
+        this.idleTimer = setTimeout(() => (this.busy ? this.touch() : this.shutdown('idle')), this.idleMs)
         this.idleTimer.unref?.()
     }
 
@@ -151,7 +153,7 @@ export class JevDevice {
         const r = await wd.windowRect()
         s.screen = { w: r.width, h: r.height }
         // XCUITest waits for the app to go idle and for animations to cool
-        // off around each gesture; a live web page never does (a Treechat
+        // off around each gesture; a live web page never does (a busy
         // stream swipe took 28s, 2.6s without). jevb settles on its own.
         if (web && ios) await wd.req('POST', wd.s('/appium/settings'), { settings: { waitForIdleTimeout: 0, animationCoolOffTimeout: 0, waitForQuiescence: false } })
         if (s.webContext) await wd.context(s.webContext)
@@ -252,6 +254,10 @@ export class JevDevice {
             ({ target, el } = await this.judge(s, { intent, snap: labeled }))
             target.labeled = labeled.labeled
         }
+        // Not in the tree at all (a clickable div with no role): find it on
+        // the screenshot, computer-use style, and tap there.
+        const seen = weak() && await this.locateVisually(s, intent)
+        if (seen) ({ target, el } = seen)
         if (weak()) {
             throw Object.assign(new Error(`no confident match for "${intent}"`), { code: 'NO_MATCH', detail: target, checks: checkResults })
         }
@@ -288,6 +294,26 @@ export class JevDevice {
                 ? { ...e, label: label.get(e.id), desc: e.desc.replace(/^(\S+) "[^"]*"/, `$1 "${label.get(e.id)}"`) }
                 : e)),
         }
+    }
+
+    // Returns { target, el } for a tap point found on the screenshot, or null
+    // (web page, no ANTHROPIC_API_KEY, or the model found nothing).
+    async locateVisually(s, intent) {
+        if (s.webContext || !labelerEnabled()) return null // pages expose clickable divs to the DOM snapshot
+        const png = await this.native(s, () => s.wd.screenshot())
+        let at
+        try {
+            at = await locateControl(png, intent)
+        } catch (e) {
+            this.log(`locating "${intent}" on the screenshot failed: ${e.message.slice(0, 160)}`)
+            return null
+        }
+        if (!at) return null
+        const k = at.width / s.screen.w // screenshot px per screen unit
+        const [x, y] = [Math.round(at.x / k), Math.round(at.y / k)]
+        this.log(`located "${intent}" on the screenshot at ${x},${y} in ${at.ms}ms (not in the accessibility tree)`)
+        const el = { id: 'visual', role: 'visual', label: intent, x, y, rect: { x: x - 10, y: y - 10, w: 20, h: 20 }, desc: `visual target for "${intent}" at ${x},${y}` }
+        return { el, target: { id: 'visual', confidence: 1, desc: el.desc, visual: true, model: process.env.JEVB_LOCATE_MODEL || 'claude-sonnet-5' } }
     }
 
     // ---- gestures --------------------------------------------------------

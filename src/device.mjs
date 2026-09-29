@@ -17,6 +17,7 @@ import { startSession } from './devicefarm.mjs'
 import { judge } from './judge.mjs'
 import { labelControls, labelerEnabled } from './labeler.mjs'
 import * as pace from './pace.mjs'
+import { ACTIONS, trackBusy } from './idle.mjs'
 import { WebDriver } from './webdriver.mjs'
 
 // Short by default: an idle device is still billed. Device Farm itself ends
@@ -58,11 +59,12 @@ export class JevDevice {
         this.sessions = new Map() // name -> { wd, platform, screen, remote, web, device }
         this.expired = new Set()
         this.idleTimer = null
+        trackBusy(this, ACTIONS)
     }
 
     touch() {
         clearTimeout(this.idleTimer)
-        this.idleTimer = setTimeout(() => this.shutdown('idle'), this.idleMs)
+        this.idleTimer = setTimeout(() => (this.busy ? this.touch() : this.shutdown('idle')), this.idleMs)
         this.idleTimer.unref?.()
     }
 

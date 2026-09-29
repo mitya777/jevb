@@ -32,6 +32,18 @@ test('snapshot: one option per real control, named the way a person would', asyn
     // Not offered: display:none, visibility:hidden, aria-hidden, covered by the fixed banner.
 })
 
+test('snapshot: controls sharing a label name the item they sit in', async () => {
+    await b.open(site.url('flow.html'))
+    assert.deepEqual(labels(await b.snap()), [
+        'textarea "Write a reply..."',
+        'button "Post reply"',
+        'button "Reply" in "First post"',
+        'button "Reply (1)" in "Second post"',
+        'button "Reply (2)" in "Third post"',
+        'button "Continue to next page"',
+    ])
+})
+
 test('snapshot: ids are live data-jevb attributes that locate the element', async () => {
     await b.open(site.url('controls.html'))
     const snap = await b.snap()

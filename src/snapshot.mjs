@@ -101,8 +101,29 @@ export function collect() {
             inView ? '' : 'offscreen',
             `at ${Math.round(r.left)},${Math.round(r.top)}`,
         ].filter(Boolean).join(' ')
-        out.push({ id, role, label, inView, desc: `${role} "${label}" ${extra}`.trim() })
+        out.push({ id, role, label, inView, el, extra })
     }
+    // Controls sharing a label ("Reply" on every post) differ only by where
+    // they are. Name the item each sits in, so "reply to the post about
+    // cats" can be matched: the LARGEST ancestor holding no other control
+    // with that label (the post card; the nearest one with text was
+    // Treechat's action bar, "10K" on every post).
+    const base = (l) => l.replace(/ \(\d+\)$/, '')
+    const count = {}
+    for (const o of out) count[base(o.label)] = (count[base(o.label)] || 0) + 1
+    for (const o of out) {
+        let context = ''
+        if (o.label && count[base(o.label)] > 1) {
+            const same = new Set(out.filter((x) => x !== o && base(x.label) === base(o.label)).map((x) => x.el))
+            for (let n = o.el.parentElement, depth = 0; n && n !== document.body && depth < 15; n = n.parentElement, depth++) {
+                if ([...same].some((x) => n.contains(x))) break // spans several items
+                const t = clean(n.innerText.replace(o.el.innerText, ' '))
+                if (t) context = t.replace(/"/g, "'").slice(0, 60)
+            }
+        }
+        o.desc = `${o.role} "${o.label}"${context ? ` in "${context}"` : ''} ${o.extra}`.trim()
+    }
+    for (const o of out) { delete o.el; delete o.extra } // not serializable / folded into desc
     return out
 }
 

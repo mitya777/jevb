@@ -59,17 +59,24 @@ export async function judge({ intent, checks = [], options, state, where }) {
             const sum = near.reduce((acc, [, p]) => acc + p, 0)
             if (near.length > 1 && sum > target.confidence) Object.assign(target, { confidence: +sum.toFixed(3), merged: near.length })
         }
-        // "The first Reply button" is positional: several identical controls
-        // ("Reply", "Reply (1)") split the probability (0.42/0.31/0.24).
-        // When the intent says first/last and the likely options are one kind
-        // of control, take the topmost/bottommost and their combined weight.
+        // "The first Reply button" / "reply to the last post" are positional:
+        // identical controls ("Reply", "Reply (1)") split the probability
+        // (0.42/0.31/0.24), or Jev just takes the first one it sees (it picked
+        // the top Reply for "the last post"). When the intent says first/last,
+        // take the topmost/bottommost on-screen control of the same kind as
+        // Jev's likeliest option, with their combined weight. Other kinds are
+        // ignored: the "Write a reply" box taking 0.2 used to block this.
         const order = /\b(first|top(most)?)\b/i.test(intent) ? 1 : /\b(last|bottom(most)?)\b/i.test(intent) ? -1 : 0
         const kind = (d) => d?.match(/^(\S+) "([^"]*?)(?: \(\d+\))?"/)?.slice(1).join(' ')
-        const likely = Object.entries(a.probabilities || {}).filter(([id, p]) => p >= 0.1 && id !== 'none')
-        if (order && likely.length > 1 && new Set(likely.map(([id]) => kind(criteria[id]))).size === 1 && kind(criteria[likely[0][0]])) {
-            const [pick] = likely.sort(([x], [y]) => order * (at(criteria[x])[1] - at(criteria[y])[1]) || at(criteria[x])[0] - at(criteria[y])[0])[0]
-            const sum = likely.reduce((acc, [, p]) => acc + p, 0)
-            Object.assign(target, { id: pick, desc: criteria[pick], confidence: +sum.toFixed(3), ordinal: order > 0 ? 'first' : 'last' })
+        const probs = a.probabilities || {}
+        const [anchor] = Object.entries(probs).filter(([id]) => id !== 'none' && at(criteria[id])).sort((x, y) => y[1] - x[1])[0] || []
+        const k = anchor && kind(criteria[anchor])
+        let peers = k ? Object.keys(criteria).filter((id) => kind(criteria[id]) === k && at(criteria[id])) : []
+        if (peers.some((id) => !/ offscreen /.test(criteria[id]))) peers = peers.filter((id) => !/ offscreen /.test(criteria[id]))
+        if (order && peers.length > 1) {
+            const [pick] = peers.sort((x, y) => order * (at(criteria[x])[1] - at(criteria[y])[1]) || at(criteria[x])[0] - at(criteria[y])[0])
+            const sum = peers.reduce((acc, id) => acc + (probs[id] || 0), 0)
+            Object.assign(target, { id: pick, desc: criteria[pick], confidence: +Math.max(sum, pick === a.choice ? a.confidence : 0).toFixed(3), ordinal: order > 0 ? 'first' : 'last' })
         }
     }
 

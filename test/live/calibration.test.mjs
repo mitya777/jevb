@@ -44,30 +44,22 @@ const PICKS = {
         'post the reply': 'Post reply',
         'click the first Reply button': 'Reply',
         'click the last Reply button': 'Reply (2)',
-    },
-}
-
-// Known weak spots, reported as TODO (they don't fail the run). Identical
-// buttons are told apart only by position: the pick request carries no page
-// text, so "the last post" can't be matched to its button, and the textarea
-// "Write a reply" takes ~0.2 of the probability, which blocks the first/last
-// override (it needs every likely option to be the same kind of control).
-// Measured 9/29: first post 0.49 (just under the 0.5 bar), last post picked the FIRST Reply.
-const WEAK = {
-    'flow.html': {
+        // Were TODO before duplicate-label context + the kind-based override:
+        // first post 0.49 (under the bar), last post picked the FIRST Reply.
         'reply to the first post': 'Reply',
         'reply to the last post': 'Reply (2)',
+        'reply to the second post': 'Reply (1)',
     },
 }
 
 const SKIP = !live && 'set JEVB_LIVE=1 and TYPESAFEAI_API_KEY'
-for (const [todo, set] of [[false, PICKS], ['positional pick without page context', WEAK]]) for (const [page, cases] of Object.entries(set)) {
+for (const [page, cases] of Object.entries(PICKS)) {
     for (const [intent, want] of Object.entries(cases)) {
-        test(`pick on ${page}: ${intent} → ${want ?? 'NO_MATCH'}`, { skip: SKIP, todo }, async () => {
+        test(`pick on ${page}: ${intent} → ${want ?? 'NO_MATCH'}`, { skip: SKIP }, async () => {
             await b.open(site.url(page))
             let got
             try { got = (await b.find(intent)).target } catch (e) { if (e.code !== 'NO_MATCH') throw e; got = { ...e.detail, noMatch: true } }
-            const label = got.desc?.match(/^\S+ "(.*)"/)?.[1]
+            const label = got.desc?.match(/^\S+ "([^"]*)"/)?.[1]
             margins.push(`${(got.confidence ?? 0).toFixed(2)} pick  ${intent} → ${got.noMatch ? 'NO_MATCH' : label}`)
             if (want === null) assert.ok(got.noMatch, `picked ${label} (${got.confidence})`)
             else assert.equal(label, want, JSON.stringify(got.top))

@@ -81,6 +81,19 @@ test('judge: "first"/"last" pick the topmost/bottommost of identical controls', 
     assert.equal(mixed.target.ordinal, undefined)
 })
 
+test('judge: "last" wins even when Jev picks the wrong one and another kind takes a share', async () => {
+    // Measured on real Jev: "reply to the last post" -> the FIRST Reply 0.44, the textarea 0.22.
+    jev.answer(() => ({ target: { choice: 'e2', confidence: 0.35, probabilities: { e2: 0.44, e1: 0.22, none: 0.12, e4: 0.06, e3: 0.05 } } }))
+    const res = await run({ intent: 'reply to the last post', options: opts('textarea "Write a reply..." at 8,98', 'button "Reply" at 8,190', 'button "Reply (1)" at 8,261', 'button "Reply (2)" at 8,332') })
+    assert.deepEqual([res.target.id, res.target.ordinal, res.target.confidence], ['e4', 'last', 0.55])
+})
+
+test('judge: "last" means the last one on screen, not one scrolled far below', async () => {
+    jev.answer(() => ({ target: { choice: 'e1', confidence: 0.6, probabilities: { e1: 0.6, e2: 0.3 } } }))
+    const res = await run({ intent: 'click the last Reply', options: opts('button "Reply" at 8,100', 'button "Reply (1)" at 8,400', 'button "Reply (2)" offscreen at 8,4000') })
+    assert.equal(res.target.id, 'e2')
+})
+
 test('judge: no options is an error before any request', async () => {
     await assert.rejects(run({ intent: 'x', options: opts() }), { code: 'NO_ELEMENTS' })
     assert.equal(jev.requests.length, 0)

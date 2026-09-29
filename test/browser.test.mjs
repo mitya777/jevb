@@ -24,14 +24,16 @@ test('an idle-expired session throws instead of judging a blank page', async () 
     } finally { await b.shutdown() }
 })
 
-// Known bug: the idle timer is armed when an action starts, so an action that
-// runs longer than idleMs (a slow SPA settling, `scroll end` on a feed) has
-// Chromium closed under it: "Target page, context or browser has been closed".
-test('an action longer than idleMs is not killed mid-flight', { todo: 'idle timer should pause while an action runs' }, async () => {
+// The idle timer used to be armed when an action started, so an action that
+// ran longer than idleMs (cold launch + slow page, `scroll end`) had Chromium
+// closed under it: "Target page, context or browser has been closed".
+test('an action longer than idleMs is not killed mid-flight; idle counts from its end', async () => {
     const b = new JevBrowser({ pace: 'agent', idleMs: 400 })
     try {
         await b.open(site.url('slow/800/flow.html'))
         assert.equal((await b.check('is "Post reply" shown?')).pass, true)
+        await new Promise((r) => setTimeout(r, 700))
+        await assert.rejects(b.check('is "Post reply" shown?'), { code: 'SESSION_EXPIRED' })
     } finally { await b.shutdown() }
 })
 

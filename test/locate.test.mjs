@@ -2,14 +2,13 @@ import assert from 'node:assert/strict'
 import http from 'node:http'
 import { test } from 'node:test'
 
-// A PNG header is all locateControl reads (for the pixel size).
-function pngHeader(w, h) {
-    const b = Buffer.alloc(33)
-    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13]).copy(b)
-    b.write('IHDR', 12)
-    b.writeUInt32BE(w, 16)
-    b.writeUInt32BE(h, 20)
-    return b.toString('base64')
+import { PNG } from 'pngjs'
+
+// A blank screenshot of the given size (locateControl decodes and shrinks it).
+function blankPng(w, h) {
+    const png = new PNG({ width: w, height: h })
+    png.data.fill(255)
+    return PNG.sync.write(png).toString('base64')
 }
 
 test('a control missing from the tree is tapped where Claude points on the screenshot', async () => {
@@ -30,17 +29,19 @@ test('a control missing from the tree is tapped where Claude points on the scree
     const { JevDevice } = await import('../src/device.mjs')
     try {
         // Android: screenshot px == screen units; iOS would be 3x.
-        const s = { webContext: null, platform: 'ios', screen: { w: 390, h: 844 }, wd: { screenshot: async () => pngHeader(1170, 2532) } }
+        const s = { webContext: null, platform: 'ios', screen: { w: 390, h: 844 }, wd: { screenshot: async () => blankPng(1170, 2532) } }
         const found = await new JevDevice().locateVisually(s, 'open the sidebar menu')
         assert.equal(seen.tools[0].type, 'computer_toolset_20260801')
         assert.equal(seen.model, 'claude-sonnet-5')
         assert.match(seen.messages[0].content[0].text, /open the sidebar menu/)
-        assert.deepEqual([found.el.x, found.el.y], [15, 50], 'screenshot pixels scaled to screen points')
+        const sent = PNG.sync.read(Buffer.from(seen.messages[0].content[1].source.data, 'base64'))
+        assert.equal(sent.width, 585, 'shrunk to <= 720 wide (1170 / 2)')
+        assert.deepEqual([found.el.x, found.el.y], [30, 100], 'click in the shrunk image -> screenshot px -> screen points')
         assert.equal(found.target.visual, true)
 
         // A point inside a tree element taps that element (exact bounds).
         const snap = { elements: [
-            { id: 'e1', desc: 'image "Image" at 6,40', x: 22, y: 56, rect: { x: 6, y: 40, w: 32, h: 32 } },
+            { id: 'e1', desc: 'image "Image" at 14,86', x: 30, y: 102, rect: { x: 14, y: 86, w: 32, h: 32 } },
             { id: 'e2', desc: 'other "Header" at 0,30', x: 195, y: 60, rect: { x: 0, y: 30, w: 390, h: 60 } },
         ] }
         const snapped = await new JevDevice().locateVisually(s, 'open the sidebar menu', snap)
@@ -48,10 +49,10 @@ test('a control missing from the tree is tapped where Claude points on the scree
 
         // A big element that merely contains the point (a composer box under
         // an open sidebar) is not the pointed-at control: tap the point.
-        const behind = { elements: [{ id: 'e16', desc: 'textbox "Market" at 12,20', x: 195, y: 60, rect: { x: 12, y: 20, w: 366, h: 80 } }] }
+        const behind = { elements: [{ id: 'e16', desc: 'textbox "Market" at 12,60', x: 195, y: 100, rect: { x: 12, y: 60, w: 366, h: 80 } }] }
         const notSnapped = await new JevDevice().locateVisually(s, 'open the Channels page', behind)
         assert.equal(notSnapped.el.id, 'visual')
-        assert.deepEqual([notSnapped.el.x, notSnapped.el.y], [15, 50])
+        assert.deepEqual([notSnapped.el.x, notSnapped.el.y], [30, 100])
     } finally {
         server.close()
     }

@@ -278,6 +278,10 @@ export class JevDevice {
             return null
         }
         if (!at) return null
+        if (at.none) {
+            this.log(`screenshot fallback for "${intent}" found nothing (${at.ms}ms): ${at.said || 'no click'}`)
+            return null
+        }
         const k = at.width / s.screen.w // screenshot px per screen unit
         const [x, y] = [Math.round(at.x / k), Math.round(at.y / k)]
         // A tree element that IS the pointed-at control (its center within ~6%

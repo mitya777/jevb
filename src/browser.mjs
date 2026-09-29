@@ -13,6 +13,7 @@ const DEFAULT_IDLE_MS = Number(process.env.JEVB_IDLE_MS || 120_000)
 // launching Chromium. Sessions become tabs in that Chrome's own profile, so
 // its cookies, sign-ins and Password Manager apply.
 const CDP_URL = process.env.JEVB_CDP_URL || null
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 export class JevBrowser {
     constructor({ idleMs = DEFAULT_IDLE_MS, pace: p, headless = process.env.JEVB_HEADED !== '1',
@@ -162,18 +163,38 @@ export class JevBrowser {
         const pc = pace.resolvePace(p || this.pace)
         const { page, locator, target, checks: checkResults } = await this.find(intent, { session, checks })
         // Some clicks navigate a beat later (after an analytics call, say).
-        // Watch for a main-frame navigation request briefly and wait it out.
-        // A navigation *request* comes before the new document commits, and
+        // Watch for a main-frame navigation request and wait it out. A
+        // navigation *request* comes before the new document commits, and
         // load-state waits in between resolve against the old document, so
         // wait for the main frame to actually navigate before settling.
-        let onRequest
-        const navigated = new Promise((resolve) => {
-            onRequest = (req) => req.isNavigationRequest() && req.frame() === page.mainFrame() && resolve(true)
-            page.on('request', onRequest)
-            setTimeout(() => resolve(false), 1_200)
-        })
+        // No navigation: done once the page has settled and the fetches the
+        // click started have finished, with a moment of quiet (a fixed 1.2s
+        // window used to be the floor of every in-app click).
+        const pending = new Set()
+        let resolveNav
+        const navigation = new Promise((r) => { resolveNav = r })
+        const onRequest = (req) => {
+            if (req.isNavigationRequest() && req.frame() === page.mainFrame()) resolveNav(true)
+            else if (['fetch', 'xhr', 'ping', 'beacon'].includes(req.resourceType())) pending.add(req)
+        }
+        const onDone = (req) => pending.delete(req)
+        page.on('request', onRequest)
+        page.on('requestfinished', onDone)
+        page.on('requestfailed', onDone)
         const committed = page.waitForEvent('framenavigated', { predicate: (f) => f === page.mainFrame(), timeout: 15_000 }).catch(() => null)
+        let clickedAt
+        const quiet = async () => {
+            await sleep(150) // let the click handler issue its requests
+            for (let calm = 0; Date.now() - clickedAt < 1_200;) {
+                calm = pending.size ? 0 : calm + 1
+                if (calm >= 2) return false
+                await sleep(50)
+            }
+            return false
+        }
         await pace.click(page, locator, pc)
+        clickedAt = Date.now()
+        const navigated = Promise.race([navigation, quiet()])
         await pace.settle(page, pc)
         if (await navigated) {
             await committed
@@ -181,6 +202,8 @@ export class JevBrowser {
             await pace.settle(page, pc)
         }
         page.off('request', onRequest)
+        page.off('requestfinished', onDone)
+        page.off('requestfailed', onDone)
         return { clicked: target, url: page.url(), checks: checkResults }
     }
 

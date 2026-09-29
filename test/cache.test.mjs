@@ -37,6 +37,8 @@ before(async () => {
     await new Promise((r) => server.once('listening', r))
     process.env.TYPESAFE_ENDPOINT = `http://127.0.0.1:${server.address().port}`
     process.env.TYPESAFEAI_API_KEY = 'test-key'
+    process.env.JEVB_CACHE = 'off' // tests pass their own ReplayCache; never touch ./.jevb
+    delete process.env.JEVB_REPLAY
 })
 after(() => server.close())
 
@@ -63,7 +65,7 @@ test('a repeat run replays picks and checks without asking Jev', async () => {
     const dir = tmp()
     const cache = new ReplayCache(path.join(dir, 'cache.json'))
     reset()
-    const first = await run(dir, SCENARIO(), { cache })
+    const first = await run(dir, SCENARIO(), { cache, replay: true })
     assert.equal(first.failed, 0)
     assert.equal(calls.choice, 2)
     assert.equal(calls.noul, 2)
@@ -72,7 +74,7 @@ test('a repeat run replays picks and checks without asking Jev', async () => {
     assert.ok(!JSON.stringify(saved).includes('hello from jevb'), 'typed text is not stored')
 
     reset()
-    const second = await run(dir, SCENARIO(), { cache: new ReplayCache(path.join(dir, 'cache.json')) })
+    const second = await run(dir, SCENARIO(), { cache: new ReplayCache(path.join(dir, 'cache.json')), replay: true })
     assert.equal(second.failed, 0)
     assert.deepEqual(calls, { choice: 0, noul: 0 })
     assert.deepEqual(second.cacheHits, { picks: 2, checks: 2 })
@@ -83,7 +85,7 @@ test('a repeat run replays picks and checks without asking Jev', async () => {
 test('a changed screen falls back to Jev and re-records', async () => {
     const dir = tmp()
     const file = path.join(dir, 'cache.json')
-    await run(dir, SCENARIO(), { cache: new ReplayCache(file) })
+    await run(dir, SCENARIO(), { cache: new ReplayCache(file), replay: true })
     // Same page, but the button is renamed: the cached fingerprint is gone.
     const changed = path.join(dir, 'changed.html')
     fs.writeFileSync(changed, fs.readFileSync(new URL(fixture), 'utf8').replace('>Post reply<', '>Post your reply<'))
@@ -92,7 +94,7 @@ test('a changed screen falls back to Jev and re-records', async () => {
     const c = new ReplayCache(file)
     for (const k of Object.keys(c.data.picks)) c.data.picks[k.replace(pageKey(fixture), pageKey(changedUrl))] = c.data.picks[k]
     reset()
-    const res = await run(dir, SCENARIO(changedUrl), { cache: c })
+    const res = await run(dir, SCENARIO(changedUrl), { cache: c, replay: true })
     assert.equal(res.failed, 0)
     assert.equal(calls.choice, 1, 'only the renamed button needed Jev')
     assert.equal(c.data.picks[`${pageKey(changedUrl)} Post reply`][0].fp, 'button "Post your reply"')
@@ -141,13 +143,13 @@ export async function browser({ page, args }) {
     process.env.JEVB_TEST_TEXT = 'from env'
 
     reset()
-    const fast = await run(dir, `open ${fixture}\ndo reply text="hi there"\ncheck does the page show "Posted: hi there"?\n`, { cache: false })
+    const fast = await run(dir, `open ${fixture}\ndo reply text="hi there"\ncheck does the page show "Posted: hi there"?\n`, { cache: false, replay: true })
     assert.equal(fast.failed, 0)
     assert.equal(calls.choice, 0, 'the block used no Jev picks')
     assert.equal(fast.results[1].ran, 'reply.mjs')
 
     reset()
-    const fell = await run(dir, `open ${fixture}\ndo reply text=boom\ncheck does the page show "Posted: boom"?\n`, { cache: false })
+    const fell = await run(dir, `open ${fixture}\ndo reply text=boom\ncheck does the page show "Posted: boom"?\n`, { cache: false, replay: true })
     assert.equal(fell.failed, 0)
     assert.equal(calls.choice, 2)
     const step = fell.results.find((r) => r.action === 'reply')
@@ -176,13 +178,13 @@ test('picks inside an action replay for any argument value', async () => {
     const cache = () => new ReplayCache(path.join(dir, 'cache.json'))
 
     reset()
-    assert.equal((await run(dir, `open ${fixture}\ndo nav section=Home\n`, { cache: cache() })).failed, 0)
+    assert.equal((await run(dir, `open ${fixture}\ndo nav section=Home\n`, { cache: cache(), replay: true })).failed, 0)
     assert.equal(calls.choice, 1)
     const saved = JSON.parse(fs.readFileSync(path.join(dir, 'cache.json'), 'utf8'))
     assert.deepEqual(saved.picks, { [`${pageKey(fixture)} open the \${section} link`]: [{ fp: 'a "${section}"', confidence: 0.9 }] })
 
     reset()
-    const other = await run(dir, `open ${fixture}\ndo nav section=Settings\n`, { cache: cache() })
+    const other = await run(dir, `open ${fixture}\ndo nav section=Settings\n`, { cache: cache(), replay: true })
     assert.equal(other.failed, 0)
     assert.equal(calls.choice, 0, 'a new value replays the template')
     const step = other.results.find((r) => r.step === 'nav › act open the Settings link')
@@ -198,4 +200,51 @@ test('argument values are never stored, even when they are secrets', () => {
     c.rememberPick('p', 'open the profile of s3cret-user', { desc: els[0].desc, confidence: 0.9 }, els, template)
     assert.deepEqual(c.data.picks, { 'p open the profile of ${who}': [{ fp: 'clickable "${who}"', confidence: 0.9 }] })
     assert.equal(c.pick('p', 'open the profile of s3cret-user', els, template).el.id, 'e1')
+})
+
+test('replay is off by default: every pick asks Jev, nothing is written, code blocks are skipped', async () => {
+    const dir = tmp()
+    const file = path.join(dir, 'cache.json')
+    await run(dir, SCENARIO(), { cache: new ReplayCache(file), replay: true }) // a warm cache exists
+    reset()
+    const res = await run(dir, SCENARIO(), { cache: new ReplayCache(file) })
+    assert.equal(res.failed, 0)
+    assert.deepEqual(calls, { choice: 2, noul: 2 }, 'the warm cache is ignored')
+    assert.equal(res.replay, false)
+    assert.equal(res.cacheHits, null)
+
+    fs.mkdirSync(path.join(dir, 'actions'))
+    fs.writeFileSync(path.join(dir, 'actions', 'reply.mjs'), 'export async function browser({ page }) { throw new Error("should not run") }\n')
+    fs.writeFileSync(path.join(dir, 'actions', 'reply.jevb'), 'type the Write a reply box => ${text}\nact Post reply\n')
+    const plain = await run(dir, `open ${fixture}\ndo reply text=hi\n`, { cache: false })
+    assert.equal(plain.failed, 0)
+    assert.equal(plain.results.find((r) => r.action === 'reply').ran, 'reply.jevb')
+    assert.equal(plain.results.find((r) => r.action === 'reply').fallback, undefined)
+
+    // A code-only action needs replay: caught before anything runs.
+    fs.writeFileSync(path.join(dir, 'actions', 'fast.mjs'), 'export async function browser() {}\n')
+    await assert.rejects(run(dir, `open ${fixture}\ndo fast\n`, { cache: false }), /only a code block .* replay is off/)
+    // ...unless the scenario turns replay on itself.
+    const on = await run(dir, `replay on\nopen ${fixture}\ndo fast\n`, { cache: false })
+    assert.equal(on.failed, 0)
+    assert.equal(on.results.find((r) => r.action === 'fast').ran, 'fast.mjs')
+    // An explicit option beats the scenario line, like --pace.
+    await assert.rejects(run(dir, `replay on\nopen ${fixture}\ndo fast\n`, { cache: false, replay: false }), /replay is off/)
+})
+
+test('replay can be switched per call on a browser (the CLI --replay flag)', async () => {
+    const { JevBrowser } = await import('../src/browser.mjs')
+    const dir = tmp()
+    const b = new JevBrowser({ cache: new ReplayCache(path.join(dir, 'c.json')) })
+    assert.equal(b.replay, false)
+    try {
+        await b.open(fixture)
+        reset()
+        await b.act('Post reply', { replay: true }) // records
+        await b.act('Post reply', { replay: true }) // replays
+        await b.act('Post reply') // default off: asks Jev
+        assert.equal(calls.choice, 2)
+    } finally {
+        await b.shutdown()
+    }
 })

@@ -225,9 +225,22 @@ apps usually build clickable rows and pills.
 an analytics call). It then waits for the new page to commit, load, and for
 its text to stop changing, so checks never judge a blank page.
 
-### Replay cache
+### Replay: cache and code blocks (opt-in)
 
-Jev's answers are saved, so a repeat run only asks Jev about what changed.
+Replay is **off by default**: every pick and check asks Jev, and `do NAME`
+runs the plain `NAME.jevb` steps. Turn it on with any of these:
+
+| | |
+|---|---|
+| `jevb run my.jevb --replay` | one scenario run (`--no-replay` forces it off) |
+| `jevb act ... --replay` | one command (also `type`, `check`, `checks`) |
+| `jevb replay on` / `off` | the daemon's default for later commands |
+| `replay on` / `replay off` | a line in a scenario (an explicit `--replay`/`--no-replay` wins, like `--pace`) |
+| `JEVB_REPLAY=1` | default for everything |
+| `runScenario(file, { replay: true })`, `new JevBrowser({ replay: true })` | library |
+
+With replay on, Jev's answers are saved and a repeat run only asks Jev about
+what changed, and `do NAME` prefers a code block (below).
 
 - **Picks.** An `act`/`type` intent on a page is saved as the fingerprint of the
   element Jev chose: its role and label, without position or current value.
@@ -252,7 +265,7 @@ Jev's answers are saved, so a repeat run only asks Jev about what changed.
   shapes are kept.
 
 The file is `.jevb/cache.json` in the working directory (`JEVB_CACHE=path`
-moves it, `JEVB_CACHE=off` or `jevb run --no-cache` disables it). Commit it
+moves it; `JEVB_CACHE=off` keeps code blocks but skips the cache). Commit it
 if CI should replay too. Results mark replayed steps `cached: true`, and
 `jevb run` reports `cacheHits`. Measured on `examples/tour-treechat.jevb`
 (agent pace, 2026-09-29): 15 Jev requests / 69k tokens on the first run,
@@ -264,14 +277,16 @@ about 20s, because on desktop the waits for pages to settle dominate, not Jev.
 `do NAME key=value ...` runs a named action, looked up in `actions/` next to
 the scenario, then in `.jevb/actions/`, then in `JEVB_ACTIONS` (colon-separated dirs):
 
-1. `NAME.mjs`: code. `export async function browser({ page, args, jevb })`
+1. `NAME.mjs` (replay on only): code. `export async function browser({ page, args, jevb })`
    gets the Playwright page; `export async function device({ wd, session, args, jevb })`
    gets the phone. `jevb` is the running JevBrowser/JevDevice, so a block can
    mix exact Playwright steps with `jevb.act(...)` / `jevb.check(...)`.
 2. `NAME.jevb`: plain steps, with `${key}` for arguments. `${UPPER}` names are
    still read from the environment.
 
-The `.mjs` runs when it has an export for the current backend. If it throws
+With replay on, the `.mjs` runs when it has an export for the current backend. With
+replay off it is skipped, and an action that has only a `.mjs` fails before
+the first step. If it throws
 and a `.jevb` exists, the `.jevb` runs instead, and the result notes the
 `fallback`. So a hand-written Playwright block handles the fast path, and
 the plain-language version takes over when a selector drifts.

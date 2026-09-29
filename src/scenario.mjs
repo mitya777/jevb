@@ -22,14 +22,17 @@
 // `runScenario(file, { device, app })` (CLI: --device/--app) presets them,
 // so one scenario runs on any phone.
 //
-// Reusable actions: `do NAME key=value ...` runs actions/NAME.mjs (code,
-// e.g. Playwright: export async function browser({ page, args, jevb })) when
-// it exists for this backend, else actions/NAME.jevb (steps; ${key} is an
-// argument). A failing block falls back to the .jevb. See findAction.
+// Reusable actions: `do NAME key=value ...` runs actions/NAME.jevb (steps;
+// ${key} is an argument). See findAction.
 //
 //   do login email=${TEST_EMAIL} password=${TEST_PASSWORD}
 //
-// Picks and checks replay from the cache (cache.mjs) when the screen allows.
+// Replay (off by default; `replay on` here, --replay, JEVB_REPLAY=1, or
+// runScenario(file, { replay: true })) turns on the fast paths: picks and
+// checks replay from the cache (cache.mjs) when the screen allows, and `do`
+// prefers actions/NAME.mjs (code, e.g. Playwright:
+// export async function browser({ page, args, jevb })), falling back to
+// NAME.jevb if the block throws.
 //
 // Exit code is non-zero if any check fails or any step throws. Consecutive
 // checks are batched into one Jev request (see runScenario).
@@ -37,7 +40,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { JevBrowser } from './browser.mjs'
-import { ReplayCache } from './cache.mjs'
+import { ReplayCache, replayDefault } from './cache.mjs'
 import { JevDevice } from './device.mjs'
 import { apiKey } from './jev.mjs'
 
@@ -79,19 +82,22 @@ function redact(result) {
     return JSON.parse(json)
 }
 
-export async function runScenario(file, { pace, baseUrl, batch = true, onStep = console.log, device, app, cache, actionDirs = [] } = {}) {
+export async function runScenario(file, { pace, baseUrl, batch = true, onStep = console.log, device, app, replay, cache, actionDirs = [] } = {}) {
     if (fs.existsSync('.env')) { try { process.loadEnvFile('.env') } catch {} }
     const steps = parse(fs.readFileSync(file, 'utf8'))
     const dirs = actionPaths(file, actionDirs)
     // Fail before renting a phone: a missing key or ${NAME} used to surface
     // only at the first Jev call, after ~2 billed device minutes.
     apiKey()
-    preflight(steps, dirs)
     const onDevice = !!(device || app) || steps.some((s) => ['device', 'app', 'platform'].includes(s.cmd))
-    // cache: undefined = JEVB_CACHE (default .jevb/cache.json), false = off.
-    const replay = cache === false ? null : cache || ReplayCache.fromEnv()
-    if (replay) replay.secrets = secretValues // typed secrets must never reach the cache file
-    const b = onDevice ? new JevDevice({ pace, log: (m) => onStep({ log: m }), cache: replay }) : new JevBrowser({ pace, idleMs: 10 * 60_000, cache: replay })
+    // replay: an explicit option wins over `replay` lines, like --pace.
+    // cache: a ReplayCache to use (tests), else JEVB_CACHE / .jevb/cache.json.
+    const replayFixed = replay !== undefined
+    const store = cache === false ? null : cache || ReplayCache.fromEnv()
+    if (store) store.secrets = secretValues // typed secrets must never reach the cache file
+    const opts = { pace, cache: store || false, replay: replayFixed ? !!replay : replayDefault() }
+    const b = onDevice ? new JevDevice({ ...opts, log: (m) => onStep({ log: m }) }) : new JevBrowser({ ...opts, idleMs: 10 * 60_000 })
+    preflight(steps, dirs, b.replay, replayFixed)
     const deviceOpts = { ...(device && { device }), ...(app && { app }) } // consumed by the next open
     const target = (arg) => (arg && baseUrl ? new URL(arg, baseUrl).href : arg || undefined)
     const results = []
@@ -132,6 +138,7 @@ export async function runScenario(file, { pace, baseUrl, batch = true, onStep = 
                 switch (s.cmd) {
                     // An explicit --pace wins over the scenario's own pace lines.
                     case 'pace': if (!pace) b.pace = s.arg; out = { pace: b.pace }; break
+                    case 'replay': if (!replayFixed) b.replay = !/^(off|no|false|0)$/i.test(s.arg); out = { replay: b.replay }; break
                     case 'device': case 'app': case 'platform': deviceOpts[s.cmd] = s.arg; out = { [s.cmd]: s.arg }; break
                     case 'open': {
                         const opts = { ...deviceOpts }
@@ -178,7 +185,7 @@ export async function runScenario(file, { pace, baseUrl, batch = true, onStep = 
         const found = findAction(name, dirs)
         const values = Object.fromEntries(Object.entries(args).map(([k, v]) => [k, expand(v)]))
         let blockError = null
-        if (found.block) {
+        if (found.block && b.replay) {
             const mod = await import(pathToFileURL(found.block).href)
             const fn = onDevice ? mod.device : mod.browser || mod.default
             if (fn) {
@@ -194,7 +201,7 @@ export async function runScenario(file, { pace, baseUrl, batch = true, onStep = 
                 }
             }
         }
-        if (!found.steps) throw new Error(`action "${name}": ${found.block ? `${path.basename(found.block)} has no ${onDevice ? 'device' : 'browser'} export` : 'not found'} (looked in ${dirs.join(', ')})`)
+        if (!found.steps) throw new Error(`action "${name}": ${!found.block ? `not found (looked in ${dirs.join(', ')})` : !b.replay ? `${path.basename(found.block)} is a code block and replay is off; add ${name}.jevb or turn replay on` : `${path.basename(found.block)} has no ${onDevice ? 'device' : 'browser'} export`}`)
         const sub = actionSteps(found.steps, values)
         const ok = await runSteps(sub, chain)
         return { action: name, ran: path.basename(found.steps), ...(blockError && { fallback: `block failed: ${blockError}` }), ...(!ok && { error: `action "${name}" failed` }) }
@@ -209,9 +216,9 @@ export async function runScenario(file, { pace, baseUrl, batch = true, onStep = 
         }
     } finally {
         var { videos } = await b.shutdown('scenario done')
-        replay?.save()
+        if (b.cache) b.cache.save()
     }
-    return { failed, results, videos, jevCalls: b.jevRequests, jevTokens: b.jevTokens, cacheHits: replay ? { ...replay.hits } : null, totalMs: lastWorkEnd - started }
+    return { failed, results, videos, jevCalls: b.jevRequests, jevTokens: b.jevTokens, replay: b.replay, cacheHits: b.cache && (b.replay || b.cache.hits.picks || b.cache.hits.checks) ? { ...b.cache.hits } : null, totalMs: lastWorkEnd - started }
 }
 
 // ---- actions ---------------------------------------------------------------
@@ -260,15 +267,18 @@ export function actionSteps(file, values) {
 }
 
 // Everything that can fail before the first (possibly billed) step: env
-// variables in type steps and action arguments, and that actions exist.
-function preflight(steps, dirs, seen = new Set()) {
+// variables in type steps and action arguments, and that actions exist
+// (a code-only action needs replay on, unless a `replay on` line turns it on).
+function preflight(steps, dirs, replay, fixed = false, seen = new Set()) {
     for (const s of steps) {
+        if (s.cmd === 'replay' && !fixed) replay = !/^(off|no|false|0)$/i.test(s.arg)
         if (s.cmd === 'type') expand(s.arg.split(/\s*=>\s*/)[1] ?? '')
         if (s.cmd !== 'do') continue
         const { name, args } = parseDo(s.arg)
         const values = Object.fromEntries(Object.entries(args).map(([k, v]) => [k, expand(v)]))
         const found = findAction(name, dirs)
         if (!found.block && !found.steps) throw Object.assign(new Error(`action "${name}" not found (looked in ${dirs.join(', ')})`), { code: 'NO_ACTION' })
-        if (found.steps && !seen.has(name)) preflight(actionSteps(found.steps, values), dirs, new Set([...seen, name]))
+        if (!found.steps && !replay) throw Object.assign(new Error(`action "${name}" is only a code block (${path.basename(found.block)}) and replay is off; add ${name}.jevb or turn replay on`), { code: 'NEEDS_REPLAY' })
+        if (found.steps && !seen.has(name)) preflight(actionSteps(found.steps, values), dirs, replay, fixed, new Set([...seen, name]))
     }
 }

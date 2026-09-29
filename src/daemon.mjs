@@ -23,6 +23,7 @@ const ACTIONS = {
     shot: (b, a) => b.screenshot(a.path, a),
     close: (b, a) => b.close(a),
     pace: (b, a, d) => { if (a.pace) b.pace = d.pace = a.pace; return { pace: b.pace } },
+    replay: (b, a, d) => { if (a.replay !== undefined) b.replay = d.replay = a.replay; return { replay: b.replay } },
 }
 
 // A session opened with --device/--app lives on a phone; everything else is
@@ -53,7 +54,7 @@ export function serve() {
                 await shutdownAll('stop')
                 return process.exit(0)
             }
-            const useDevice = !['status', 'devices', 'pace'].includes(name) && onDevice(device, name, args)
+            const useDevice = !['status', 'devices', 'pace', 'replay'].includes(name) && onDevice(device, name, args)
             send(200, await ACTIONS[name](useDevice ? device : browser, args, device))
         } catch (e) {
             send(500, { error: e.message, code: e.code, detail: e.detail, checks: e.checks })

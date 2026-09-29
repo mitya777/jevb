@@ -3,7 +3,7 @@
 // (fresh) on the next one. Sessions are named browser contexts.
 import { chromium } from 'playwright-core'
 import { OVERLAY } from './demo.mjs'
-import { ReplayCache, pageKey } from './cache.mjs'
+import { ReplayCache, pageKey, replayDefault } from './cache.mjs'
 import { judge } from './judge.mjs'
 import * as pace from './pace.mjs'
 import { pageState, shortlist, snapshot } from './snapshot.mjs'
@@ -19,8 +19,8 @@ export class JevBrowser {
     constructor({ idleMs = DEFAULT_IDLE_MS, pace: p, headless = process.env.JEVB_HEADED !== '1',
         viewport = { width: 1280, height: 800 }, minConfidence = 0.5, log = () => {},
         demo = process.env.JEVB_DEMO === '1', videoDir = process.env.JEVB_VIDEO || null, cdpUrl = CDP_URL,
-        cache = ReplayCache.fromEnv() } = {}) {
-        Object.assign(this, { idleMs, headless, viewport, minConfidence, log, demo, videoDir, cdpUrl, cache })
+        replay = replayDefault(), cache = null } = {}) {
+        Object.assign(this, { idleMs, headless, viewport, minConfidence, log, demo, videoDir, cdpUrl, replay, cache })
         this.step = ''
         this.jevRequests = 0
         this.jevTokens = { input: 0, output: 0 }
@@ -118,7 +118,7 @@ export class JevBrowser {
     }
 
     status() {
-        return { browser: this.browser ? 'up' : 'down', pace: this.pace, sessions: [...this.sessions.keys()], idleMs: this.idleMs }
+        return { browser: this.browser ? 'up' : 'down', pace: this.pace, replay: this.replay, sessions: [...this.sessions.keys()], idleMs: this.idleMs }
     }
 
     // ---- actions ---------------------------------------------------------
@@ -132,13 +132,13 @@ export class JevBrowser {
     }
 
     // Jev judgments for one page state (see judge.mjs).
-    async judge(page, { intent, checks = [], template } = {}) {
+    async judge(page, { intent, checks = [], template, replay } = {}) {
         const res = await judge({
             intent, checks,
             options: async () => shortlist(await snapshot(page), intent),
             state: () => pageState(page),
             where: async () => ({ url: page.url(), title: await page.title() }),
-            cache: this.cache, page: pageKey(page.url()), minConfidence: this.minConfidence, template,
+            cache: this.replayCache(replay), page: pageKey(page.url()), minConfidence: this.minConfidence, template,
         })
         this.jevRequests += res.requests
         this.jevTokens.input += res.usage.input
@@ -150,18 +150,25 @@ export class JevBrowser {
     // Jev picks which element an intent refers to. Low confidence or "none"
     // throws with the top candidates (and any batched check results) so the
     // calling agent can rephrase.
-    async find(intent, { session, checks, template } = {}) {
+    // The replay cache when replay is on (per call, else this.replay).
+    replayCache(replay = this.replay) {
+        if (!replay) return null
+        if (this.cache === null) this.cache = ReplayCache.fromEnv() || false
+        return this.cache || null
+    }
+
+    async find(intent, { session, checks, template, replay } = {}) {
         const page = await this.page(session)
-        const { target, checks: checkResults } = await this.judge(page, { intent, checks, template })
+        const { target, checks: checkResults } = await this.judge(page, { intent, checks, template, replay })
         if (target.id === 'none' || target.confidence < this.minConfidence) {
             throw Object.assign(new Error(`no confident match for "${intent}"`), { code: 'NO_MATCH', detail: target, checks: checkResults })
         }
         return { page, locator: page.locator(`[data-jevb="${target.id}"]`), target, checks: checkResults }
     }
 
-    async act(intent, { session, pace: p, checks, template } = {}) {
+    async act(intent, { session, pace: p, checks, template, replay } = {}) {
         const pc = pace.resolvePace(p || this.pace)
-        const { page, locator, target, checks: checkResults } = await this.find(intent, { session, checks, template })
+        const { page, locator, target, checks: checkResults } = await this.find(intent, { session, checks, template, replay })
         // Some clicks navigate a beat later (after an analytics call, say).
         // Watch for a main-frame navigation request and wait it out. A
         // navigation *request* comes before the new document commits, and
@@ -207,9 +214,9 @@ export class JevBrowser {
         return { clicked: target, url: page.url(), checks: checkResults }
     }
 
-    async type(intent, text, { session, pace: p, submit = false, checks, template } = {}) {
+    async type(intent, text, { session, pace: p, submit = false, checks, template, replay } = {}) {
         const pc = pace.resolvePace(p || this.pace)
-        const { page, locator, target, checks: checkResults } = await this.find(intent, { session, checks, template })
+        const { page, locator, target, checks: checkResults } = await this.find(intent, { session, checks, template, replay })
         await pace.type(page, locator, text, pc)
         if (submit) { await pace.press(page, 'Enter', pc); await pace.settle(page, pc) }
         return { typed: target, chars: text.length, checks: checkResults }
@@ -230,13 +237,13 @@ export class JevBrowser {
 
     // Test assertions: Jev nouls over the visible page, all in one request.
     // pass = noul >= threshold (0.7), or for negate/refute noul < threshold (0.3).
-    async checks(items, { session } = {}) {
+    async checks(items, { session, replay } = {}) {
         const page = await this.page(session)
-        return (await this.judge(page, { checks: items })).checks
+        return (await this.judge(page, { checks: items, replay })).checks
     }
 
-    async check(question, { session, threshold, negate = false } = {}) {
-        return (await this.checks([{ question, threshold, negate }], { session }))[0]
+    async check(question, { session, threshold, negate = false, replay } = {}) {
+        return (await this.checks([{ question, threshold, negate }], { session, replay }))[0]
     }
 
     async snap({ session } = {}) {

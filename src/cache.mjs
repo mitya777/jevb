@@ -18,8 +18,12 @@
 // state Jev judged (visible text, fields). Same screen, same answer; any
 // change to the screen is a miss. Only hashes are stored, never page text.
 //
+// Off unless asked for: `--replay`, JEVB_REPLAY=1, `replay on` in a scenario,
+// or { replay: true } in the library. With replay off, every pick and check
+// asks Jev and nothing is read or written here.
+//
 // File: JEVB_CACHE (default .jevb/cache.json in the working directory;
-// "off" disables). It holds UI labels and hashes only, so it can be
+// "off" disables even with replay on). It holds UI labels and hashes only, so it can be
 // committed and let CI replay without Jev calls.
 import crypto from 'node:crypto'
 import fs from 'node:fs'
@@ -61,6 +65,8 @@ function unfill(fp, values) {
 }
 
 const at = (desc) => desc?.match(/ at (-?\d+),(-?\d+)$/)?.slice(1).map(Number)
+
+export const replayDefault = () => ['1', 'true', 'on', 'yes'].includes(String(process.env.JEVB_REPLAY || '').toLowerCase())
 
 export class ReplayCache {
     constructor(file) {

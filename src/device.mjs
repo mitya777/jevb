@@ -13,7 +13,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { deviceSnapshot, shortlist } from './device-snapshot.mjs'
 import { collect, readState } from './snapshot.mjs'
-import { ReplayCache, pageKey } from './cache.mjs'
+import { ReplayCache, pageKey, replayDefault } from './cache.mjs'
 import { startSession } from './devicefarm.mjs'
 import { judge } from './judge.mjs'
 import { labelControls, labelerEnabled } from './labeler.mjs'
@@ -49,8 +49,8 @@ const GENERIC_LABEL = /^(button|imagebutton|imageview|image|view|viewgroup|other
 const ANDROID_KEYS = { Enter: 66, Back: 4, Home: 3, Tab: 61, Escape: 111, Backspace: 67, Delete: 67 }
 
 export class JevDevice {
-    constructor({ idleMs = DEFAULT_IDLE_MS, pace: p, minConfidence = 0.5, log = () => {}, cache = ReplayCache.fromEnv() } = {}) {
-        Object.assign(this, { idleMs, minConfidence, log, cache })
+    constructor({ idleMs = DEFAULT_IDLE_MS, pace: p, minConfidence = 0.5, log = () => {}, replay = replayDefault(), cache = null } = {}) {
+        Object.assign(this, { idleMs, minConfidence, log, replay, cache })
         this.pace = pace.resolvePace(p)
         this.step = ''
         this.jevRequests = 0
@@ -89,7 +89,7 @@ export class JevDevice {
     status() {
         return {
             devices: [...this.sessions].map(([name, s]) => ({ session: name, device: s.device, platform: s.platform, remote: s.remote?.arn || 'local' })),
-            pace: this.pace, idleMs: this.idleMs,
+            pace: this.pace, replay: this.replay, idleMs: this.idleMs,
         }
     }
 
@@ -223,7 +223,7 @@ export class JevDevice {
         await sleep(Math.min(2500, 400 + cur.snap.state.viewport_text.length / 8))
     }
 
-    async judge(s, { intent, checks = [], snap, template }) {
+    async judge(s, { intent, checks = [], snap, template, replay }) {
         // One read shared by the choice and the checks (they run in parallel):
         // each read renumbers the page's elements, so two reads of a changing
         // page gave the pick an id from one and the lookup the other.
@@ -235,7 +235,7 @@ export class JevDevice {
             state: async () => (await read()).state,
             where: async () => ({ platform: s.platform, device: s.device, ...(s.webContext && { browser: s.platform === 'ios' ? 'Safari' : 'Chrome', url: await s.wd.currentUrl() }) }),
             // Native screens have no url: the fingerprint match does the work.
-            cache: this.cache, page: async () => (s.webContext ? `${s.platform} ${pageKey(await s.wd.currentUrl())}` : `${s.platform} app`),
+            cache: this.replayCache(replay), page: async () => (s.webContext ? `${s.platform} ${pageKey(await s.wd.currentUrl())}` : `${s.platform} app`),
             minConfidence: this.minConfidence, template,
         })
         this.jevRequests += res.requests
@@ -245,15 +245,22 @@ export class JevDevice {
         return { target: res.target, el, checks: res.checks, snap: await snapP }
     }
 
-    async find(intent, { session, checks, template } = {}) {
+    // The replay cache when replay is on (per call, else this.replay).
+    replayCache(replay = this.replay) {
+        if (!replay) return null
+        if (this.cache === null) this.cache = ReplayCache.fromEnv() || false
+        return this.cache || null
+    }
+
+    async find(intent, { session, checks, template, replay } = {}) {
         const s = this.session(session)
-        let { target, el, checks: checkResults, snap } = await this.judge(s, { intent, checks, template })
+        let { target, el, checks: checkResults, snap } = await this.judge(s, { intent, checks, template, replay })
         const weak = () => target.id === 'none' || target.confidence < this.minConfidence || !el
         // Unlabeled icons (an app's menu button reads as a bare "Button"):
         // have Haiku name them from a screenshot and ask again, once.
         const labeled = weak() && snap && await this.labelUnlabeled(s, snap)
         if (labeled) {
-            ({ target, el } = await this.judge(s, { intent, snap: labeled, template }))
+            ({ target, el } = await this.judge(s, { intent, snap: labeled, template, replay }))
             target.labeled = labeled.labeled
         }
         if (weak()) {
@@ -431,17 +438,17 @@ export class JevDevice {
         return { device: s.device, platform: s.platform, ...(url && { url }), ...(s.remote && { deviceFarmSession: s.remote.arn, deviceStartMs: s.remote.startMs }) }
     }
 
-    async act(intent, { session, pace: p, checks, template } = {}) {
+    async act(intent, { session, pace: p, checks, template, replay } = {}) {
         const pc = pace.resolvePace(p || this.pace)
-        const { s, el, target, checks: checkResults } = await this.find(intent, { session, checks, template })
+        const { s, el, target, checks: checkResults } = await this.find(intent, { session, checks, template, replay })
         await this.tap(s, el, pc)
         await this.settle(s, pc)
         return { tapped: target, checks: checkResults }
     }
 
-    async type(intent, text, { session, pace: p, submit = false, checks, template } = {}) {
+    async type(intent, text, { session, pace: p, submit = false, checks, template, replay } = {}) {
         const pc = pace.resolvePace(p || this.pace)
-        const { s, el, target, checks: checkResults } = await this.find(intent, { session, checks, template })
+        const { s, el, target, checks: checkResults } = await this.find(intent, { session, checks, template, replay })
         const tapped = await this.tap(s, el, pc)
         await sleep(pc === 'human' ? rand(300, 600) : 300) // keyboard comes up
         // Web fields and iOS append each element send. UiAutomator2 replaces
@@ -576,12 +583,12 @@ export class JevDevice {
         return { scrolled: to || Number(dy) }
     }
 
-    async checks(items, { session } = {}) {
-        return (await this.judge(this.session(session), { checks: items })).checks
+    async checks(items, { session, replay } = {}) {
+        return (await this.judge(this.session(session), { checks: items, replay })).checks
     }
 
-    async check(question, { session, threshold, negate = false } = {}) {
-        return (await this.checks([{ question, threshold, negate }], { session }))[0]
+    async check(question, { session, threshold, negate = false, replay } = {}) {
+        return (await this.checks([{ question, threshold, negate }], { session, replay }))[0]
     }
 
     async snap({ session } = {}) {

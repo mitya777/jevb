@@ -33,23 +33,27 @@ const USAGE = `jevb <command> [args] [--pace human|agent] [--session NAME]
   snap                             list interactive elements Jev chooses from
   shot <path> [--full]             screenshot
   pace [human|agent]               get/set the daemon default pace
+  replay [on|off]                  get/set the daemon default for --replay
   close                            close session (last one closes chromium)
   status | stop | serve
   run <scenario.jevb> [--base URL] [--device NAME --app FILE]
                                    run a scenario file in-process (for tests);
                                    consecutive checks batch into one Jev call
-                                   (--no-batch to compare). Jev's picks and
+                                   (--no-batch to compare). \`do NAME k=v\` runs
+                                   actions/NAME.jevb.
+  --replay / --no-replay           fast paths, off by default: Jev's picks and
                                    checks replay from .jevb/cache.json when the
-                                   screen still matches (--no-cache to skip).
-                                   \`do NAME k=v\` steps run actions/NAME.mjs
-                                   (code, e.g. Playwright) or actions/NAME.jevb
+                                   screen still matches, and \`do NAME\` prefers
+                                   actions/NAME.mjs (code, e.g. Playwright).
+                                   Works on run and on act/type/check commands.
 
 Pace: human (default) = curved mouse, hover dwell, per-key typing, reading
 pauses. agent = as fast as possible. Env: TYPESAFEAI_API_KEY (or ./.env),
 JEVB_PACE, JEVB_PORT, JEVB_IDLE_MS (chromium), JEVB_DAEMON_IDLE_MS, JEVB_HEADED=1,
 JEVB_DEMO=1 (visible cursor + Jev HUD), JEVB_VIDEO=<dir> (record .webm),
 JEVB_CDP_URL (attach to a running Chrome, e.g. from bin/jevb-chrome.sh),
-JEVB_CACHE (replay cache file, default .jevb/cache.json; off to disable),
+JEVB_REPLAY=1 (replay on by default), JEVB_CACHE (replay cache file, default
+.jevb/cache.json; off to disable),
 JEVB_ACTIONS (extra action dirs, colon-separated).
 Devices: AWS credentials (AWS_PROFILE etc.), JEVB_DF_PROJECT_ARN (default:
 project "jevb"), JEVB_DEVICE_IDLE_MS (release an idle phone, default 3 min),
@@ -65,7 +69,7 @@ function parseArgs(argv) {
         else if (a.startsWith('--')) {
             const k = a.slice(2)
             const next = argv[i + 1]
-            if (['enter', 'full', 'help', 'no-batch', 'no-cache'].includes(k)) flags[k] = true
+            if (['enter', 'full', 'help', 'no-batch', 'replay', 'no-replay'].includes(k)) flags[k] = true
             else if (k === 'check' || k === 'refute') { (flags[k] ||= []).push(next); i++ }
             else { flags[k] = next; i++ }
         } else pos.push(a)
@@ -99,11 +103,12 @@ async function main() {
     const { flags, pos, rest } = parseArgs(argv)
     if (!cmd || flags.help || cmd === 'help') return console.log(USAGE)
 
+    const replayFlag = flags.replay ? true : flags['no-replay'] ? false : undefined
     if (cmd === 'serve') return (await import('../src/daemon.mjs')).serve()
     if (cmd === 'run') {
         const { runScenario } = await import('../src/scenario.mjs')
-        const { failed, videos, totalMs, jevCalls, jevTokens, cacheHits } = await runScenario(pos[0], { pace: flags.pace, baseUrl: flags.base, batch: !flags['no-batch'], device: flags.device, app: flags.app, ...(flags['no-cache'] && { cache: false }), onStep: (r) => console.log(JSON.stringify(r)) })
-        console.log(JSON.stringify({ done: true, failed, totalMs, jevCalls, jevTokens, cacheHits, videos }))
+        const { failed, videos, totalMs, jevCalls, jevTokens, replay, cacheHits } = await runScenario(pos[0], { pace: flags.pace, baseUrl: flags.base, batch: !flags['no-batch'], device: flags.device, app: flags.app, ...(replayFlag !== undefined && { replay: replayFlag }), onStep: (r) => console.log(JSON.stringify(r)) })
+        console.log(JSON.stringify({ done: true, failed, totalMs, jevCalls, jevTokens, replay, cacheHits, videos }))
         process.exitCode = failed ? 1 : 0
         return
     }
@@ -113,7 +118,7 @@ async function main() {
     }
 
     const batched = [...(flags.check || []).map((q) => ({ question: q })), ...(flags.refute || []).map((q) => ({ question: q, negate: true }))]
-    const common = { session: flags.session, pace: flags.pace, ...(batched.length && { checks: batched }) }
+    const common = { session: flags.session, pace: flags.pace, ...(replayFlag !== undefined && { replay: replayFlag }), ...(batched.length && { checks: batched }) }
     const text = pos.join(' ')
     const args = {
         status: {}, snap: common, close: common,
@@ -127,6 +132,7 @@ async function main() {
         refute: { ...common, question: text, threshold: flags.threshold, negate: true },
         shot: { ...common, path: path.resolve(pos[0] || 'jevb.png'), fullPage: !!flags.full },
         pace: { pace: pos[0] },
+        replay: { ...(pos[0] && { replay: !/^(off|no|false|0)$/i.test(pos[0]) }) },
         checks: common,
     }[cmd]
     if (!args) { console.error(USAGE); process.exitCode = 2; return }

@@ -106,18 +106,23 @@ export async function judge({ intent, checks = [], options, state, where }) {
     return { target, checks: checkResults, requests, summary, usage }
 }
 
-// Checks wait like Playwright's expect: re-judge the screen until they pass
-// or waitMs runs out (JEVB_CHECK_WAIT_MS, default 4000). A Channels page
-// judged 0.4s after the tap was still a spinner (0.12); its list came a
-// second later. Checks riding with an action judge the screen before it,
-// so they're asked once.
-export async function waitForChecks(run, waitMs = Number(process.env.JEVB_CHECK_WAIT_MS ?? 4000)) {
+// Waiting, like Playwright's auto-wait and expect: re-judge the screen every
+// 0.6s until it's ready or waitMs runs out (JEVB_WAIT_MS, default 4000).
+// A Channels page judged 0.4s after the tap was still a spinner (0.12), and
+// right after "Log In" the app showed only a spinner, so the next tap found
+// nothing. `ready(result)` says when to stop.
+export const waitMsDefault = () => Number(process.env.JEVB_WAIT_MS ?? 4000)
+export async function waitUntil(run, ready, waitMs = waitMsDefault()) {
     const started = Date.now()
     for (let tries = 1; ; tries++) {
-        const results = await run()
-        if (results.every((c) => c.pass) || Date.now() - started >= waitMs) {
-            return tries > 1 ? results.map((c) => ({ ...c, tries, waitedMs: Date.now() - started })) : results
-        }
+        const result = await run()
+        if (ready(result) || Date.now() - started >= waitMs) return { result, tries, waitedMs: Date.now() - started }
         await new Promise((r) => setTimeout(r, 600))
     }
+}
+
+// Standalone checks: until they all pass.
+export async function waitForChecks(run, waitMs) {
+    const { result, tries, waitedMs } = await waitUntil(run, (rs) => rs.every((c) => c.pass), waitMs)
+    return tries > 1 ? result.map((c) => ({ ...c, tries, waitedMs })) : result
 }

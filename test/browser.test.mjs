@@ -96,3 +96,20 @@ test('a failing check re-polls until the screen gets there, within waitMs', asyn
         assert.equal(never.pass, false, 'still fails when it never appears')
     } finally { await b.shutdown() }
 })
+
+// Actions auto-wait like Playwright: right after "Log In" the app showed only
+// a spinner, and the next tap found nothing.
+test('an action waits for its target to appear, within waitMs', async () => {
+    const b = new JevBrowser({ pace: 'agent' })
+    try {
+        await b.open(site.url('next.html'))
+        const page = await b.page()
+        await page.evaluate(() => setTimeout(() => document.body.insertAdjacentHTML('beforeend', '<button onclick="this.textContent=\'Done\'">Later</button>'), 1200))
+        process.env.JEVB_WAIT_MS = '0'
+        await assert.rejects(b.act('click "Later"'), { code: 'NO_MATCH' }, 'without waiting it is not there yet')
+        process.env.JEVB_WAIT_MS = '4000'
+        const out = await b.act('click "Later"')
+        assert.ok(out.clicked.tries > 1, `re-polled (${out.clicked.tries} tries)`)
+        assert.equal(await page.locator('button').last().textContent(), 'Done')
+    } finally { process.env.JEVB_WAIT_MS = '0'; await b.shutdown() }
+})

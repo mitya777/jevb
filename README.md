@@ -219,13 +219,15 @@ jevb run my.jevb --base http://localhost:5174 --pace human
 The runner stops at the first step that throws. It exits non-zero if any
 check fails.
 
-### Checks wait
+### Waiting
 
-A failing `check`/`refute` re-judges the screen every 0.6s until it passes,
-for up to `JEVB_CHECK_WAIT_MS` (default 4000; 0 disables), like Playwright's
-`expect`. A page still loading, such as a list behind a spinner, passes once it's
-there. A real failure costs the wait. Checks that ride along with an action
-judge the screen before that action, so they are asked once.
+Like Playwright's auto-wait and `expect`, jevb re-judges the screen every 0.6s
+until it's ready, for up to `JEVB_WAIT_MS` (default 4000; 0 disables).
+- A failing `check`/`refute` passes once the screen gets there, such as a list
+  behind a spinner. A real failure costs the wait.
+- An `act`/`type` waits until its target is on screen and the checks riding
+  along with it pass. Only then does it tap or fall back to the screenshot. Right
+  after logging in, an app may show just a spinner.
 
 ### Secrets
 

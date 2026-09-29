@@ -14,7 +14,7 @@ import path from 'node:path'
 import { deviceSnapshot, shortlist } from './device-snapshot.mjs'
 import { collect, readState } from './snapshot.mjs'
 import { startSession } from './devicefarm.mjs'
-import { judge, waitForChecks } from './judge.mjs'
+import { judge, waitForChecks, waitUntil } from './judge.mjs'
 import { locateControl, locateEnabled } from './locate.mjs'
 import * as pace from './pace.mjs'
 import { ACTIONS, trackBusy } from './idle.mjs'
@@ -243,8 +243,14 @@ export class JevDevice {
 
     async find(intent, { session, checks } = {}) {
         const s = this.session(session)
-        let { target, el, checks: checkResults, snap } = await this.judge(s, { intent, checks })
-        const weak = () => target.id === 'none' || target.confidence < this.minConfidence || !el
+        const weakFor = (t, e) => t.id === 'none' || t.confidence < this.minConfidence || !e
+        // Wait until the target is on screen and the ride-along checks (which
+        // describe the screen before the action) pass, or JEVB_WAIT_MS ends.
+        const waited = await waitUntil(() => this.judge(s, { intent, checks }),
+            (r) => !weakFor(r.target, r.el) && r.checks.every((c) => c.pass))
+        let { target, el, checks: checkResults, snap } = waited.result
+        if (waited.tries > 1) Object.assign(target, { tries: waited.tries, waitedMs: waited.waitedMs })
+        const weak = () => weakFor(target, el)
         // No confident match (an unnamed control, or one missing from the
         // tree like a clickable div with no role): Claude finds it on the
         // screenshot, computer-use style. Model-written labels for unnamed

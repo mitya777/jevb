@@ -40,7 +40,8 @@
   },
   "scripts": {
     "test": "node --test test/*.test.mjs",
-    "test:live": "JEVB_LIVE=1 node --test test/live/*.test.mjs"
+    "test:live": "JEVB_LIVE=1 node --test test/live/*.test.mjs",
+    "preversion": "npm test"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.129.0",

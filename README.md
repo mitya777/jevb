@@ -17,6 +17,22 @@ server. It runs at human pace by default, or as fast as possible.
 | TypeSafe API key | everything | `TYPESAFEAI_API_KEY` |
 | AWS credentials with Device Farm access | real phones (optional, metered) | `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY`, or an AWS profile |
 
+Install the latest release (while the repo is private, `gh` must be logged
+in with access to it):
+
+```bash
+gh release download --repo mitya777/jevb --pattern 'jevb-*.tgz' --dir /tmp/jevb --clobber && npm install -g /tmp/jevb/jevb-*.tgz
+npx -y playwright-core install chromium-headless-shell
+```
+
+Then put the key(s) in the environment or in `.env` in the directory you run
+jevb from (see `.env.example`).
+
+`jevb update` installs the newest release and refreshes its Chromium.
+`jevb update --check` only reports, and `jevb version` prints the installed
+version. From a git clone, `update` tells you to `git pull && npm install`
+instead:
+
 ```bash
 git clone https://github.com/mitya777/jevb && cd jevb && npm install
 npx playwright-core install chromium-headless-shell
@@ -286,6 +302,17 @@ Library use: `import { JevBrowser, JevDevice, runScenario } from 'jevb'`.
 - Fixture flow (type, click, 2 checks): ~2.5s at agent pace, ~6s at human pace.
 - Jev calls: 140–310ms each.
 - Chromium cold start: 220–400ms.
+
+## Releasing
+
+```bash
+npm version patch   # or minor / major: runs npm test, bumps, commits, tags vX.Y.Z
+git push --follow-tags
+```
+
+The tag starts `.github/workflows/release.yml`. It re-runs the tests on the
+tagged commit, runs `npm pack`, and publishes a GitHub Release with
+`jevb-X.Y.Z.tgz` attached. That's what `jevb update` installs.
 
 ## License
 

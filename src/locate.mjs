@@ -2,6 +2,7 @@
 // confident match: an unnamed control, or one missing from the tree (a
 // clickable div with no role). Uses Claude with the computer-use toolset.
 // Off unless ANTHROPIC_API_KEY is set (env or ./.env).
+import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import Anthropic from '@anthropic-ai/sdk'
 import { PNG } from 'pngjs'
@@ -77,4 +78,31 @@ function shrink(buf, k) {
         }
     }
     return { png: PNG.sync.write(out).toString('base64'), width: out.width, height: out.height }
+}
+
+// What the screen shows, as text, read from the screenshot by Claude Haiku.
+// For app screens whose accessibility tree lags or leaves things out: after
+// an in-app navigation, Treechat's Android tree still held the old screen
+// while its feed was plainly visible, so checks judged the wrong screen.
+// Reading text is a strength (unlike pinpointing controls). Cached by image.
+const TEXT_MODEL = process.env.JEVB_TEXT_MODEL || 'claude-haiku-4-5'
+const textCache = new Map()
+export async function screenText(png) {
+    const key = createHash('sha1').update(png).digest('hex')
+    if (textCache.has(key)) return textCache.get(key)
+    client ||= new Anthropic()
+    const res = await client.messages.create({
+        model: TEXT_MODEL,
+        max_tokens: 2000,
+        messages: [{
+            role: 'user',
+            content: [
+                { type: 'image', source: { type: 'base64', media_type: 'image/png', data: png } },
+                { type: 'text', text: 'Transcribe all text visible on this phone screen, top to bottom, one line per visual line. Skip the status bar (time, battery, signal). Reply with only the text.' },
+            ],
+        }],
+    })
+    const text = res.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim()
+    textCache.set(key, text)
+    return text
 }

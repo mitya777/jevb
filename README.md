@@ -130,6 +130,15 @@ prompting was off by 100px or more. Having Haiku label the unnamed controls
 first was tried and dropped: it got 3-4 of 8 right, and one confident wrong
 label led to a wrong tap. Set `JEVB_LOCATE_MODEL` to use another model.
 
+App screens are also read from their screenshots. An app's accessibility
+tree can lag the screen: after an in-app navigation, Treechat's Android tree
+still held the previous page while its feed was plainly visible. With
+`ANTHROPIC_API_KEY` set, checks on app screens judge the screen's text as Claude
+Haiku reads it from the screenshot (1-6s, cached per image; the tree's form
+fields are kept, so passwords stay masked). If the tree's text barely matches
+the screen (under 30% word overlap), its elements are treated as stale and taps
+go to the screenshot fallback. `JEVB_SCREEN_TEXT=off` keeps the tree's text.
+
 In scenarios:
 
 ```

@@ -28,6 +28,9 @@ process.env.TYPESAFE_ENDPOINT = 'http://127.0.0.1:9/unset' // until fakeJev() st
 // Never inherit the developer's jevb/.env: an attached Chrome, demo HUD,
 // video recording or a default pace would change what the tests exercise.
 for (const k of ['JEVB_CDP_URL', 'JEVB_DEMO', 'JEVB_VIDEO', 'JEVB_HEADED', 'JEVB_PACE', 'JEVB_APPIUM_URL', 'ANTHROPIC_API_KEY']) process.env[k] = ''
+// Failing checks re-poll for JEVB_CHECK_WAIT_MS; off by default so a test's
+// deliberate failures stay instant and request counts exact.
+process.env.JEVB_CHECK_WAIT_MS = '0'
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 export const FIXTURES = path.join(ROOT, 'test/fixtures')

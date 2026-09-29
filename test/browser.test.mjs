@@ -78,3 +78,21 @@ for (const pace of ['agent', 'human']) {
         } finally { await b.shutdown() }
     })
 }
+
+// Checks wait like Playwright's expect: a screen still loading (a Channels
+// page judged 0.4s after the tap showed only a spinner) passes once it's there.
+test('a failing check re-polls until the screen gets there, within waitMs', async () => {
+    const b = new JevBrowser({ pace: 'agent' })
+    try {
+        await b.open(site.url('next.html'))
+        const page = await b.page()
+        await page.evaluate(() => setTimeout(() => document.body.insertAdjacentHTML('beforeend', '<p>Loaded later</p>'), 1200))
+        const [quick] = await b.checks([{ question: 'is "Loaded later" shown?' }], { waitMs: 0 })
+        assert.equal(quick.pass, false, 'without waiting it is not there yet')
+        const [waited] = await b.checks([{ question: 'is "Loaded later" shown?' }], { waitMs: 4000 })
+        assert.equal(waited.pass, true)
+        assert.ok(waited.tries > 1 && waited.waitedMs >= 600, `re-polled (${waited.tries} tries, ${waited.waitedMs}ms)`)
+        const [never] = await b.checks([{ question: 'is "Never there" shown?' }], { waitMs: 1000 })
+        assert.equal(never.pass, false, 'still fails when it never appears')
+    } finally { await b.shutdown() }
+})

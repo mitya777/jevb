@@ -14,7 +14,7 @@ import path from 'node:path'
 import { deviceSnapshot, shortlist } from './device-snapshot.mjs'
 import { collect, readState } from './snapshot.mjs'
 import { startSession } from './devicefarm.mjs'
-import { judge } from './judge.mjs'
+import { judge, waitForChecks } from './judge.mjs'
 import { locateControl, locateEnabled } from './locate.mjs'
 import * as pace from './pace.mjs'
 import { ACTIONS, trackBusy } from './idle.mjs'
@@ -274,9 +274,13 @@ export class JevDevice {
         if (!at) return null
         const k = at.width / s.screen.w // screenshot px per screen unit
         const [x, y] = [Math.round(at.x / k), Math.round(at.y / k)]
-        // The smallest tree element containing the point, if any: tap its
-        // center (exact bounds) rather than the model's estimate.
-        const inside = (snap?.elements || []).filter((e) => e.rect && x >= e.rect.x && x <= e.rect.x + e.rect.w && y >= e.rect.y && y <= e.rect.y + e.rect.h)
+        // A tree element that IS the pointed-at control (its center within ~6%
+        // of the screen width of the point): tap its exact center. Not merely
+        // containing the point - a composer box under an open sidebar also
+        // contained the point for "Channels", and its center was 300px away.
+        const near = 0.06 * s.screen.w
+        const inside = (snap?.elements || []).filter((e) => e.rect && x >= e.rect.x && x <= e.rect.x + e.rect.w && y >= e.rect.y && y <= e.rect.y + e.rect.h
+            && Math.hypot(e.x - x, e.y - y) <= near)
             .sort((p, q) => p.rect.w * p.rect.h - q.rect.w * q.rect.h)[0]
         const el = inside || { id: 'visual', role: 'visual', label: intent, x, y, rect: { x: x - 10, y: y - 10, w: 20, h: 20 }, desc: `visual target for "${intent}" at ${x},${y}` }
         this.log(`located "${intent}" on the screenshot at ${x},${y} in ${at.ms}ms${inside ? ` -> ${inside.desc}` : ' (not in the accessibility tree)'}`)
@@ -565,8 +569,8 @@ export class JevDevice {
         return { scrolled: to || Number(dy) }
     }
 
-    async checks(items, { session } = {}) {
-        return (await this.judge(this.session(session), { checks: items })).checks
+    async checks(items, { session, waitMs } = {}) {
+        return waitForChecks(() => this.judge(this.session(session), { checks: items }).then((r) => r.checks), waitMs)
     }
 
     async check(question, { session, threshold, negate = false } = {}) {

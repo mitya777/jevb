@@ -45,6 +45,13 @@ test('a control missing from the tree is tapped where Claude points on the scree
         ] }
         const snapped = await new JevDevice().locateVisually(s, 'open the sidebar menu', snap)
         assert.equal(snapped.el.id, 'e1', 'the smallest element containing the point')
+
+        // A big element that merely contains the point (a composer box under
+        // an open sidebar) is not the pointed-at control: tap the point.
+        const behind = { elements: [{ id: 'e16', desc: 'textbox "Market" at 12,20', x: 195, y: 60, rect: { x: 12, y: 20, w: 366, h: 80 } }] }
+        const notSnapped = await new JevDevice().locateVisually(s, 'open the Channels page', behind)
+        assert.equal(notSnapped.el.id, 'visual')
+        assert.deepEqual([notSnapped.el.x, notSnapped.el.y], [15, 50])
     } finally {
         server.close()
     }

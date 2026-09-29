@@ -219,6 +219,14 @@ jevb run my.jevb --base http://localhost:5174 --pace human
 The runner stops at the first step that throws. It exits non-zero if any
 check fails.
 
+### Checks wait
+
+A failing `check`/`refute` re-judges the screen every 0.6s until it passes,
+for up to `JEVB_CHECK_WAIT_MS` (default 4000; 0 disables), like Playwright's
+`expect`. A page still loading, such as a list behind a spinner, passes once it's
+there. A real failure costs the wait. Checks that ride along with an action
+judge the screen before that action, so they are asked once.
+
 ### Secrets
 
 `${NAME}` in a `type` step is filled from the environment, or from `./.env`,

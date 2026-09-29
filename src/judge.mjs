@@ -105,3 +105,19 @@ export async function judge({ intent, checks = [], options, state, where }) {
     }), { input: 0, output: 0 })
     return { target, checks: checkResults, requests, summary, usage }
 }
+
+// Checks wait like Playwright's expect: re-judge the screen until they pass
+// or waitMs runs out (JEVB_CHECK_WAIT_MS, default 4000). A Channels page
+// judged 0.4s after the tap was still a spinner (0.12); its list came a
+// second later. Checks riding with an action judge the screen before it,
+// so they're asked once.
+export async function waitForChecks(run, waitMs = Number(process.env.JEVB_CHECK_WAIT_MS ?? 4000)) {
+    const started = Date.now()
+    for (let tries = 1; ; tries++) {
+        const results = await run()
+        if (results.every((c) => c.pass) || Date.now() - started >= waitMs) {
+            return tries > 1 ? results.map((c) => ({ ...c, tries, waitedMs: Date.now() - started })) : results
+        }
+        await new Promise((r) => setTimeout(r, 600))
+    }
+}

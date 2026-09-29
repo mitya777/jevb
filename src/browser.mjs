@@ -3,7 +3,7 @@
 // (fresh) on the next one. Sessions are named browser contexts.
 import { chromium } from 'playwright-core'
 import { OVERLAY } from './demo.mjs'
-import { judge } from './judge.mjs'
+import { judge, waitForChecks } from './judge.mjs'
 import * as pace from './pace.mjs'
 import { ACTIONS, trackBusy } from './idle.mjs'
 import { pageState, shortlist, snapshot } from './snapshot.mjs'
@@ -206,9 +206,9 @@ export class JevBrowser {
 
     // Test assertions: Jev nouls over the visible page, all in one request.
     // pass = noul >= threshold (0.7), or for negate/refute noul < threshold (0.3).
-    async checks(items, { session } = {}) {
+    async checks(items, { session, waitMs } = {}) {
         const page = await this.page(session)
-        return (await this.judge(page, { checks: items })).checks
+        return waitForChecks(() => this.judge(page, { checks: items }).then((r) => r.checks), waitMs)
     }
 
     async check(question, { session, threshold, negate = false } = {}) {

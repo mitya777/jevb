@@ -118,6 +118,16 @@ Device Farm is us-west-2 only. `--app` takes a local `.apk`/`.ipa` (uploaded),
 an https/s3 URL, an upload ARN, or an installed bundle id / package name. An
 iOS app must be a device build (`.ipa`), not a simulator build.
 
+Unlabeled controls in apps: when Jev finds no confident match and the screen
+has controls with no accessible name (a menu button that reads as a bare
+"Button"), jevb sends one screenshot to Claude Haiku. Haiku names those
+controls ("Open navigation menu"), and Jev is asked again. It runs only when
+`ANTHROPIC_API_KEY` is set (env or `./.env`), costs about 2-3k tokens per screen
+that needs it, and caches labels by layout. Haiku sees the whole screen, so it
+can infer what a control does. An icon captioner (OmniParser) that only sees
+the icon could not: it called the same logo "a tree or plant growth
+indicator". The durable fix is still an accessible name in the app.
+
 In scenarios:
 
 ```

@@ -15,6 +15,7 @@ import { deviceSnapshot, shortlist } from './device-snapshot.mjs'
 import { collect, readState } from './snapshot.mjs'
 import { startSession } from './devicefarm.mjs'
 import { judge } from './judge.mjs'
+import { labelControls, labelerEnabled } from './labeler.mjs'
 import * as pace from './pace.mjs'
 import { WebDriver } from './webdriver.mjs'
 
@@ -41,7 +42,6 @@ function scrollPage(to, dy) {
     else el.scrollBy({ top: dy, behavior: 'instant' })
 }
 
-const CAPTION_URL = process.env.JEVB_CAPTION_URL || 'http://127.0.0.1:7799'
 // Labels that say nothing: the element type standing in for a missing name.
 const GENERIC_LABEL = /^(button|imagebutton|imageview|image|view|viewgroup|other|framelayout|linearlayout|clickable|)$/i
 
@@ -246,11 +246,11 @@ export class JevDevice {
         let { target, el, checks: checkResults, snap } = await this.judge(s, { intent, checks })
         const weak = () => target.id === 'none' || target.confidence < this.minConfidence || !el
         // Unlabeled icons (an app's menu button reads as a bare "Button"):
-        // caption them from a screenshot and ask again, once.
-        const captioned = weak() && snap && await this.captionUnlabeled(s, snap)
-        if (captioned) {
-            ({ target, el } = await this.judge(s, { intent, snap: captioned }))
-            target.captioned = captioned.captioned
+        // have Haiku name them from a screenshot and ask again, once.
+        const labeled = weak() && snap && await this.labelUnlabeled(s, snap)
+        if (labeled) {
+            ({ target, el } = await this.judge(s, { intent, snap: labeled }))
+            target.labeled = labeled.labeled
         }
         if (weak()) {
             throw Object.assign(new Error(`no confident match for "${intent}"`), { code: 'NO_MATCH', detail: target, checks: checkResults })
@@ -258,31 +258,34 @@ export class JevDevice {
         return { s, el, target, checks: checkResults }
     }
 
-    // Label a native screen's unlabeled controls with OmniParser's icon
-    // captioner (tools/icon-caption, local). One screenshot; the service crops.
-    // Returns a relabelled copy of snap, or null (web page, nothing to caption,
-    // or the service isn't running).
-    async captionUnlabeled(s, snap) {
-        if (s.webContext) return null // pages already get class/icon hints
+    // Name a native screen's unlabeled controls with Claude Haiku (see
+    // labeler.mjs): one screenshot, positions as fractions of the screen.
+    // Returns a relabelled copy of snap, or null (web page, nothing unlabeled,
+    // no ANTHROPIC_API_KEY, or the call failed).
+    async labelUnlabeled(s, snap) {
+        if (s.webContext || !labelerEnabled()) return null // pages get class/icon hints instead
         const todo = snap.elements.filter((e) => e.rect && GENERIC_LABEL.test(e.label.trim()))
         if (!todo.length) return null
         const png = await this.native(s, () => s.wd.screenshot())
-        const k = Buffer.from(png, 'base64').readUInt32BE(16) / s.screen.w // PNG width / screen units
-        const boxes = todo.map((e) => [e.rect.x, e.rect.y, e.rect.w, e.rect.h].map((v) => Math.round(v * k)))
-        const res = await fetch(`${CAPTION_URL}/caption`, { method: 'POST', body: JSON.stringify({ screenshot: png, boxes }) })
-            .then((r) => r.json()).catch((e) => ({ error: `not reachable (${e.cause?.code || e.message}); see tools/icon-caption` }))
-        if (!res?.captions) {
-            if (!this.captionWarned) this.log(`icon captioner at ${CAPTION_URL}: ${res?.error || 'no captions'}`)
-            this.captionWarned = true
+        const { w, h } = s.screen
+        const controls = todo.map((e) => ({ id: e.id, box: { x: e.rect.x / w, y: e.rect.y / h, w: e.rect.w / w, h: e.rect.h / h } }))
+        let res
+        try {
+            res = await labelControls(png, controls, { context: `${s.platform} app` })
+        } catch (e) {
+            if (!this.labelWarned) this.log(`labeling unlabeled controls failed: ${e.message.slice(0, 160)}`)
+            this.labelWarned = true
             return null
         }
-        const cap = new Map(todo.map((e, i) => [e.id, res.captions[i].replace(/"/g, "'").replace(/\.$/, '')]))
-        this.log(`captioned ${todo.length} unlabeled controls in ${res.ms}ms`)
+        const named = todo.filter((e) => typeof res.labels[e.id] === 'string' && res.labels[e.id].trim())
+        if (!named.length) return null
+        this.log(`Haiku named ${named.length} unlabeled controls in ${res.ms}ms${res.cached ? ' (cached)' : ''}`)
+        const label = new Map(named.map((e) => [e.id, res.labels[e.id].trim().replace(/"/g, "'").slice(0, 80)]))
         return {
             ...snap,
-            captioned: todo.length,
-            elements: snap.elements.map((e) => (cap.has(e.id)
-                ? { ...e, label: `icon: ${cap.get(e.id)}`, desc: e.desc.replace(/^(\S+) "[^"]*"/, `$1 "icon: ${cap.get(e.id)}"`) }
+            labeled: named.length,
+            elements: snap.elements.map((e) => (label.has(e.id)
+                ? { ...e, label: label.get(e.id), desc: e.desc.replace(/^(\S+) "[^"]*"/, `$1 "${label.get(e.id)}"`) }
                 : e)),
         }
     }

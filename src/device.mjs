@@ -41,6 +41,10 @@ function scrollPage(to, dy) {
     else el.scrollBy({ top: dy, behavior: 'instant' })
 }
 
+const CAPTION_URL = process.env.JEVB_CAPTION_URL || 'http://127.0.0.1:7799'
+// Labels that say nothing: the element type standing in for a missing name.
+const GENERIC_LABEL = /^(button|imagebutton|imageview|image|view|viewgroup|other|framelayout|linearlayout|clickable|)$/i
+
 const ANDROID_KEYS = { Enter: 66, Back: 4, Home: 3, Tab: 61, Escape: 111, Backspace: 67, Delete: 67 }
 
 export class JevDevice {
@@ -218,11 +222,11 @@ export class JevDevice {
         await sleep(Math.min(2500, 400 + cur.snap.state.viewport_text.length / 8))
     }
 
-    async judge(s, { intent, checks = [] }) {
+    async judge(s, { intent, checks = [], snap }) {
         // One read shared by the choice and the checks (they run in parallel):
         // each read renumbers the page's elements, so two reads of a changing
         // page gave the pick an id from one and the lookup the other.
-        let snapP
+        let snapP = snap && Promise.resolve(snap)
         const read = () => (snapP ||= this.read(s))
         const res = await judge({
             intent, checks,
@@ -234,16 +238,53 @@ export class JevDevice {
         this.jevTokens.input += res.usage.input
         this.jevTokens.output += res.usage.output
         const el = res.target && ((await snapP)?.elements || []).find((e) => e.id === res.target.id)
-        return { target: res.target, el, checks: res.checks }
+        return { target: res.target, el, checks: res.checks, snap: await snapP }
     }
 
     async find(intent, { session, checks } = {}) {
         const s = this.session(session)
-        const { target, el, checks: checkResults } = await this.judge(s, { intent, checks })
-        if (target.id === 'none' || target.confidence < this.minConfidence || !el) {
+        let { target, el, checks: checkResults, snap } = await this.judge(s, { intent, checks })
+        const weak = () => target.id === 'none' || target.confidence < this.minConfidence || !el
+        // Unlabeled icons (an app's menu button reads as a bare "Button"):
+        // caption them from a screenshot and ask again, once.
+        const captioned = weak() && snap && await this.captionUnlabeled(s, snap)
+        if (captioned) {
+            ({ target, el } = await this.judge(s, { intent, snap: captioned }))
+            target.captioned = captioned.captioned
+        }
+        if (weak()) {
             throw Object.assign(new Error(`no confident match for "${intent}"`), { code: 'NO_MATCH', detail: target, checks: checkResults })
         }
         return { s, el, target, checks: checkResults }
+    }
+
+    // Label a native screen's unlabeled controls with OmniParser's icon
+    // captioner (tools/icon-caption, local). One screenshot; the service crops.
+    // Returns a relabelled copy of snap, or null (web page, nothing to caption,
+    // or the service isn't running).
+    async captionUnlabeled(s, snap) {
+        if (s.webContext) return null // pages already get class/icon hints
+        const todo = snap.elements.filter((e) => e.rect && GENERIC_LABEL.test(e.label.trim()))
+        if (!todo.length) return null
+        const png = await this.native(s, () => s.wd.screenshot())
+        const k = Buffer.from(png, 'base64').readUInt32BE(16) / s.screen.w // PNG width / screen units
+        const boxes = todo.map((e) => [e.rect.x, e.rect.y, e.rect.w, e.rect.h].map((v) => Math.round(v * k)))
+        const res = await fetch(`${CAPTION_URL}/caption`, { method: 'POST', body: JSON.stringify({ screenshot: png, boxes }) })
+            .then((r) => r.json()).catch((e) => ({ error: `not reachable (${e.cause?.code || e.message}); see tools/icon-caption` }))
+        if (!res?.captions) {
+            if (!this.captionWarned) this.log(`icon captioner at ${CAPTION_URL}: ${res?.error || 'no captions'}`)
+            this.captionWarned = true
+            return null
+        }
+        const cap = new Map(todo.map((e, i) => [e.id, res.captions[i].replace(/"/g, "'").replace(/\.$/, '')]))
+        this.log(`captioned ${todo.length} unlabeled controls in ${res.ms}ms`)
+        return {
+            ...snap,
+            captioned: todo.length,
+            elements: snap.elements.map((e) => (cap.has(e.id)
+                ? { ...e, label: `icon: ${cap.get(e.id)}`, desc: e.desc.replace(/^(\S+) "[^"]*"/, `$1 "icon: ${cap.get(e.id)}"`) }
+                : e)),
+        }
     }
 
     // ---- gestures --------------------------------------------------------

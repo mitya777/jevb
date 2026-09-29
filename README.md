@@ -191,6 +191,7 @@ only on the app jevb was first built for.
 
 When several controls share a label ("Reply", "Edit", "hide"), each option
 names the item it belongs to: `button "Edit" in "Grace Hopper grace@…"`.
+The same rule runs on native app screens, over the accessibility tree.
 Intents that say first/last ("edit the last row") send the copies to Jev as
 **one** option, `button "Edit" ×3, one per item, from "Ada…" to "Grace…"`. Jev
 judges which *kind* of control the intent means, and jevb picks the

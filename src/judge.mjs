@@ -8,25 +8,46 @@
 //   options(): elements to choose from, [{ id, desc }] (already shortlisted)
 //   state():   what checks judge (visible text etc.)
 //   where():   small context for the choice (url/title, or app/screen)
+//   cache, page: optional ReplayCache (cache.mjs) and this screen's page key
+//              (a string, or an async function when it costs a round trip).
+//              A cached pick or check skips its Jev request. Only picks the
+//              caller would accept (>= minConfidence) are remembered.
 import { ask } from './jev.mjs'
 
-export async function judge({ intent, checks = [], options, state, where }) {
-    let criteria
+const checkInstructions = (q) => `The user currently sees \`viewport_text\` (only the modal, when \`modal_open\` is true) and form \`fields\`. Judge what the user sees now: ${q}`
+
+export async function judge({ intent, checks = [], options, state, where, cache = null, page = '', minConfidence = 0.5 }) {
+    let criteria, opts, pageId, cachedPick = null
     const choiceReq = intent && (async () => {
-        const opts = await options()
+        if (cache) pageId = typeof page === 'function' ? await page() : page
+        opts = await options()
         if (!opts.length) throw Object.assign(new Error('no interactive elements on screen'), { code: 'NO_ELEMENTS' })
         criteria = Object.fromEntries(opts.map((e) => [e.id, e.desc]))
         criteria.none = 'No element on the page matches the intent'
+        cachedPick = cache?.pick(pageId, intent, opts)
+        if (cachedPick) return null
         return ask({ intent, page: await where() },
             { target: { type: 'choice', instructions: 'Which page element should a user interact with to accomplish `intent`?', criteria } })
     })()
     let seen
-    const checksReq = checks.length && (async () => ask(seen = await state(), Object.fromEntries(checks.map((c, i) => [
-        `check_${i}`, { type: 'noul', instructions: `The user currently sees \`viewport_text\` (only the modal, when \`modal_open\` is true) and form \`fields\`. Judge what the user sees now: ${c.question}` },
-    ]))))()
+    const cachedChecks = {}
+    const checksReq = checks.length && (async () => {
+        seen = await state()
+        const keys = checks.map((c) => cache?.checkKey(c.question, seen))
+        const todo = []
+        checks.forEach((c, i) => {
+            const noul = keys[i] && cache.check(keys[i])
+            if (noul != null) cachedChecks[`check_${i}`] = { noul, cached: true }
+            else todo.push(i)
+        })
+        if (!todo.length) return null
+        const res = await ask(seen, Object.fromEntries(todo.map((i) => [`check_${i}`, { type: 'noul', instructions: checkInstructions(checks[i].question) }])))
+        if (cache) for (const i of todo) cache.rememberCheck(keys[i], res.answers[`check_${i}`].noul)
+        return res
+    })()
     const t = Date.now()
     const [choiceRes, checksRes] = await Promise.all([choiceReq || null, checksReq || null])
-    const answers = { ...choiceRes?.answers, ...checksRes?.answers }
+    const answers = { ...choiceRes?.answers, ...checksRes?.answers, ...cachedChecks }
     const jevMs = Date.now() - t
     const requests = (choiceRes ? 1 : 0) + (checksRes ? 1 : 0)
     const batch = checks.length + (intent ? 1 : 0)
@@ -38,10 +59,13 @@ export async function judge({ intent, checks = [], options, state, where }) {
         const pass = negate ? noul < threshold : noul >= threshold
         // A failed check shows the form fields Jev judged, to tell a wrong
         // screen from a wrong judgment.
-        return { question: c.question, noul, threshold, negate, pass, jevMs, batch, requests, ...(!pass && seen?.fields?.length && { fields: seen.fields }) }
+        return { question: c.question, noul, threshold, negate, pass, jevMs, batch, requests, ...(answers[`check_${i}`].cached && { cached: true }), ...(!pass && seen?.fields?.length && { fields: seen.fields }) }
     })
     let target = null
-    if (intent) {
+    if (cachedPick) {
+        const { el, entry } = cachedPick
+        target = { id: el.id, confidence: entry.confidence, desc: el.desc, cached: true, jevMs: 0, batch, requests, top: [], ...(entry.ordinal && { ordinal: entry.ordinal }) }
+    } else if (intent) {
         const a = answers.target
         const top = Object.entries(a.probabilities || {}).sort((x, y) => y[1] - x[1]).slice(0, 3)
             .filter(([, p], i) => i === 0 || p >= 0.01).map(([id, p]) => ({ id, p: +p.toFixed(3), desc: criteria[id] }))
@@ -71,10 +95,12 @@ export async function judge({ intent, checks = [], options, state, where }) {
             const sum = likely.reduce((acc, [, p]) => acc + p, 0)
             Object.assign(target, { id: pick, desc: criteria[pick], confidence: +sum.toFixed(3), ordinal: order > 0 ? 'first' : 'last' })
         }
+        if (cache && target.id !== 'none' && target.confidence >= minConfidence) cache.rememberPick(pageId, intent, target, opts)
     }
 
     const lines = checkResults.map((c) => `${c.negate ? 'refute' : 'check'} ${c.noul.toFixed(2)} ${c.pass ? 'PASS ✓' : 'FAIL ✗'}  ${c.question}`)
-    if (target) lines.push(`picked ${target.desc.replace(/ at \d+,\d+$/, '')}  conf ${target.confidence.toFixed(2)}`)
+    if (target) lines.push(`picked ${target.desc.replace(/ at \d+,\d+$/, '')}  conf ${target.confidence.toFixed(2)}${target.cached ? '  (cached)' : ''}`)
+    cache?.save()
     const summary = `Jev ${batch} question${batch > 1 ? 's' : ''} · ${requests} parallel request${requests > 1 ? 's' : ''} · ${jevMs}ms\n  ${lines.join('\n  ')}`
     const usage = [choiceRes, checksRes].reduce((u, r) => ({
         input: u.input + (r?.usage?.input_tokens || 0), output: u.output + (r?.usage?.output_tokens || 0),

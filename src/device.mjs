@@ -13,6 +13,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { deviceSnapshot, shortlist } from './device-snapshot.mjs'
 import { collect, readState } from './snapshot.mjs'
+import { ReplayCache, pageKey } from './cache.mjs'
 import { startSession } from './devicefarm.mjs'
 import { judge } from './judge.mjs'
 import { labelControls, labelerEnabled } from './labeler.mjs'
@@ -48,8 +49,8 @@ const GENERIC_LABEL = /^(button|imagebutton|imageview|image|view|viewgroup|other
 const ANDROID_KEYS = { Enter: 66, Back: 4, Home: 3, Tab: 61, Escape: 111, Backspace: 67, Delete: 67 }
 
 export class JevDevice {
-    constructor({ idleMs = DEFAULT_IDLE_MS, pace: p, minConfidence = 0.5, log = () => {} } = {}) {
-        Object.assign(this, { idleMs, minConfidence, log })
+    constructor({ idleMs = DEFAULT_IDLE_MS, pace: p, minConfidence = 0.5, log = () => {}, cache = ReplayCache.fromEnv() } = {}) {
+        Object.assign(this, { idleMs, minConfidence, log, cache })
         this.pace = pace.resolvePace(p)
         this.step = ''
         this.jevRequests = 0
@@ -233,6 +234,9 @@ export class JevDevice {
             options: async () => shortlist((await read()).elements, intent),
             state: async () => (await read()).state,
             where: async () => ({ platform: s.platform, device: s.device, ...(s.webContext && { browser: s.platform === 'ios' ? 'Safari' : 'Chrome', url: await s.wd.currentUrl() }) }),
+            // Native screens have no url: the fingerprint match does the work.
+            cache: this.cache, page: async () => (s.webContext ? `${s.platform} ${pageKey(await s.wd.currentUrl())}` : `${s.platform} app`),
+            minConfidence: this.minConfidence,
         })
         this.jevRequests += res.requests
         this.jevTokens.input += res.usage.input

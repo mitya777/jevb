@@ -225,6 +225,73 @@ apps usually build clickable rows and pills.
 an analytics call). It then waits for the new page to commit, load, and for
 its text to stop changing, so checks never judge a blank page.
 
+### Replay cache
+
+Jev's answers are saved, so a repeat run only asks Jev about what changed.
+
+- **Picks.** An `act`/`type` intent on a page is saved as the fingerprint of the
+  element Jev chose: its role and label, without position or current value.
+  An example is `button "Post reply"`. Next time, if exactly one element on
+  screen has that fingerprint, it is used with no Jev call. "The first/last X"
+  replays as the topmost/bottommost X. No match, or several matches (a footer
+  link with the same name as a nav link, a feed of Reply buttons), asks Jev
+  again, and its new pick replaces the old one. This works the same in
+  Chromium, mobile web and native apps.
+- **Checks.** A check's answer is saved under a hash of the question plus the
+  exact state Jev judged. The same screen gives the same answer; any change to
+  the text or fields is a miss. Only hashes are stored, never page text or
+  typed values, and a pick whose label contains a `${NAME}` secret is never saved.
+
+The file is `.jevb/cache.json` in the working directory (`JEVB_CACHE=path`
+moves it, `JEVB_CACHE=off` or `jevb run --no-cache` disables it). Commit it
+if CI should replay too. Results mark replayed steps `cached: true`, and
+`jevb run` reports `cacheHits`. Measured on `examples/tour-treechat.jevb`
+(agent pace, 2026-09-29): 15 Jev requests / 69k tokens on the first run,
+5 requests / 3.4k tokens once cached, all checks passing. Wall time stayed at
+about 20s, because on desktop the waits for pages to settle dominate, not Jev.
+
+### Actions: reusable steps and Playwright blocks
+
+`do NAME key=value ...` runs a named action, looked up in `actions/` next to
+the scenario, then in `.jevb/actions/`, then in `JEVB_ACTIONS` (colon-separated dirs):
+
+1. `NAME.mjs`: code. `export async function browser({ page, args, jevb })`
+   gets the Playwright page; `export async function device({ wd, session, args, jevb })`
+   gets the phone. `jevb` is the running JevBrowser/JevDevice, so a block can
+   mix exact Playwright steps with `jevb.act(...)` / `jevb.check(...)`.
+2. `NAME.jevb`: plain steps, with `${key}` for arguments. `${UPPER}` names are
+   still read from the environment.
+
+The `.mjs` runs when it has an export for the current backend. If it throws
+and a `.jevb` exists, the `.jevb` runs instead, and the result notes the
+`fallback`. So a hand-written Playwright block handles the fast path, and
+the plain-language version takes over when a selector drifts.
+
+```
+# actions/login.jevb
+type the email field => ${email}
+type the password field => ${password}
+act sign in
+```
+```js
+// actions/login.mjs
+export async function browser({ page, args }) {
+    await page.fill('input[type=email]', args.email)
+    await page.fill('input[type=password]', args.password)
+    await page.click('button[type=submit]')
+    await page.waitForURL(/\/stream/)
+}
+```
+```
+# scenario
+open https://app.example.com/login
+do login email=${TEST_EMAIL} password=${TEST_PASSWORD}
+check is the home feed shown?
+```
+
+Missing actions and arguments fail before the first step, so no phone is
+rented for a scenario that can't run.
+
 Library use: `import { JevBrowser, JevDevice, runScenario } from 'jevb'`.
 
 ## Cost / speed (measured 2026-09-26, against treechat.com)

@@ -15,7 +15,7 @@ import { deviceSnapshot, shortlist } from './device-snapshot.mjs'
 import { collect, readState } from './snapshot.mjs'
 import { startSession } from './devicefarm.mjs'
 import { judge } from './judge.mjs'
-import { labelControls, labelerEnabled, locateControl } from './labeler.mjs'
+import { locateControl, locateEnabled } from './locate.mjs'
 import * as pace from './pace.mjs'
 import { ACTIONS, trackBusy } from './idle.mjs'
 import { WebDriver } from './webdriver.mjs'
@@ -43,8 +43,6 @@ function scrollPage(to, dy) {
     else el.scrollBy({ top: dy, behavior: 'instant' })
 }
 
-// Labels that say nothing: the element type standing in for a missing name.
-const GENERIC_LABEL = /^(button|imagebutton|imageview|image|view|viewgroup|other|framelayout|linearlayout|clickable|)$/i
 
 const ANDROID_KEYS = { Enter: 66, Back: 4, Home: 3, Tab: 61, Escape: 111, Backspace: 67, Delete: 67 }
 
@@ -247,16 +245,13 @@ export class JevDevice {
         const s = this.session(session)
         let { target, el, checks: checkResults, snap } = await this.judge(s, { intent, checks })
         const weak = () => target.id === 'none' || target.confidence < this.minConfidence || !el
-        // Unlabeled icons (an app's menu button reads as a bare "Button"):
-        // have Haiku name them from a screenshot and ask again, once.
-        const labeled = weak() && snap && await this.labelUnlabeled(s, snap)
-        if (labeled) {
-            ({ target, el } = await this.judge(s, { intent, snap: labeled }))
-            target.labeled = labeled.labeled
-        }
-        // Not in the tree at all (a clickable div with no role): find it on
-        // the screenshot, computer-use style, and tap there.
-        const seen = weak() && await this.locateVisually(s, intent)
+        // No confident match (an unnamed control, or one missing from the
+        // tree like a clickable div with no role): Claude finds it on the
+        // screenshot, computer-use style. Model-written labels for unnamed
+        // controls were tried and dropped: Haiku got 3-4 of 8 right and a
+        // wrong one ("Open navigation menu" on the floating New button) made
+        // Jev tap it confidently.
+        const seen = weak() && await this.locateVisually(s, intent, snap)
         if (seen) ({ target, el } = seen)
         if (weak()) {
             throw Object.assign(new Error(`no confident match for "${intent}"`), { code: 'NO_MATCH', detail: target, checks: checkResults })
@@ -264,42 +259,10 @@ export class JevDevice {
         return { s, el, target, checks: checkResults }
     }
 
-    // Name a native screen's unlabeled controls with Claude Haiku (see
-    // labeler.mjs): one screenshot, positions as fractions of the screen.
-    // Returns a relabelled copy of snap, or null (web page, nothing unlabeled,
-    // no ANTHROPIC_API_KEY, or the call failed).
-    async labelUnlabeled(s, snap) {
-        if (s.webContext || !labelerEnabled()) return null // pages get class/icon hints instead
-        const todo = snap.elements.filter((e) => e.rect && GENERIC_LABEL.test(e.label.trim()))
-        if (!todo.length) return null
-        const png = await this.native(s, () => s.wd.screenshot())
-        const { w, h } = s.screen
-        const controls = todo.map((e) => ({ id: e.id, box: { x: e.rect.x / w, y: e.rect.y / h, w: e.rect.w / w, h: e.rect.h / h } }))
-        let res
-        try {
-            res = await labelControls(png, controls, { context: `${s.platform} app` })
-        } catch (e) {
-            if (!this.labelWarned) this.log(`labeling unlabeled controls failed: ${e.message.slice(0, 160)}`)
-            this.labelWarned = true
-            return null
-        }
-        const named = todo.filter((e) => typeof res.labels[e.id] === 'string' && res.labels[e.id].trim())
-        if (!named.length) return null
-        this.log(`Haiku named ${named.length} unlabeled controls in ${res.ms}ms${res.cached ? ' (cached)' : ''}`)
-        const label = new Map(named.map((e) => [e.id, res.labels[e.id].trim().replace(/"/g, "'").slice(0, 80)]))
-        return {
-            ...snap,
-            labeled: named.length,
-            elements: snap.elements.map((e) => (label.has(e.id)
-                ? { ...e, label: label.get(e.id), desc: e.desc.replace(/^(\S+) "[^"]*"/, `$1 "${label.get(e.id)}"`) }
-                : e)),
-        }
-    }
-
     // Returns { target, el } for a tap point found on the screenshot, or null
     // (web page, no ANTHROPIC_API_KEY, or the model found nothing).
-    async locateVisually(s, intent) {
-        if (s.webContext || !labelerEnabled()) return null // pages expose clickable divs to the DOM snapshot
+    async locateVisually(s, intent, snap) {
+        if (s.webContext || !locateEnabled()) return null // pages expose clickable divs to the DOM snapshot
         const png = await this.native(s, () => s.wd.screenshot())
         let at
         try {
@@ -311,9 +274,13 @@ export class JevDevice {
         if (!at) return null
         const k = at.width / s.screen.w // screenshot px per screen unit
         const [x, y] = [Math.round(at.x / k), Math.round(at.y / k)]
-        this.log(`located "${intent}" on the screenshot at ${x},${y} in ${at.ms}ms (not in the accessibility tree)`)
-        const el = { id: 'visual', role: 'visual', label: intent, x, y, rect: { x: x - 10, y: y - 10, w: 20, h: 20 }, desc: `visual target for "${intent}" at ${x},${y}` }
-        return { el, target: { id: 'visual', confidence: 1, desc: el.desc, visual: true, model: process.env.JEVB_LOCATE_MODEL || 'claude-sonnet-5' } }
+        // The smallest tree element containing the point, if any: tap its
+        // center (exact bounds) rather than the model's estimate.
+        const inside = (snap?.elements || []).filter((e) => e.rect && x >= e.rect.x && x <= e.rect.x + e.rect.w && y >= e.rect.y && y <= e.rect.y + e.rect.h)
+            .sort((p, q) => p.rect.w * p.rect.h - q.rect.w * q.rect.h)[0]
+        const el = inside || { id: 'visual', role: 'visual', label: intent, x, y, rect: { x: x - 10, y: y - 10, w: 20, h: 20 }, desc: `visual target for "${intent}" at ${x},${y}` }
+        this.log(`located "${intent}" on the screenshot at ${x},${y} in ${at.ms}ms${inside ? ` -> ${inside.desc}` : ' (not in the accessibility tree)'}`)
+        return { el, target: { id: el.id, confidence: 1, desc: el.desc, visual: true, model: process.env.JEVB_LOCATE_MODEL || 'claude-sonnet-5' } }
     }
 
     // ---- gestures --------------------------------------------------------

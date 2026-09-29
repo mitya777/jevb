@@ -118,24 +118,17 @@ Device Farm is us-west-2 only. `--app` takes a local `.apk`/`.ipa` (uploaded),
 an https/s3 URL, an upload ARN, or an installed bundle id / package name. An
 iOS app must be a device build (`.ipa`), not a simulator build.
 
-Unlabeled controls in apps: when Jev finds no confident match and the screen
-has controls with no accessible name (a menu button that reads as a bare
-"Button"), jevb sends one screenshot to Claude Haiku. Haiku names those
-controls ("Open navigation menu"), and Jev is asked again. It runs only when
-`ANTHROPIC_API_KEY` is set (env or `./.env`), costs about 2-3k tokens per screen
-that needs it, and caches labels by layout. Haiku sees the whole screen, so it
-can infer what a control does. An icon captioner (OmniParser) that only sees
-the icon could not: it called the same logo "a tree or plant growth
-indicator". The durable fix is still an accessible name in the app.
-
-Controls missing from the tree entirely (a clickable div with no role, which
-Android doesn't expose) can't be named, so as a last resort jevb asks Claude
-Sonnet 5 with the computer-use toolset where on the screenshot to tap, and
-taps there (target `visual`). It runs only when the tree and Haiku found
-nothing. It costs about 6k tokens (~1-2 cents) and takes 1.5-4s. Its trained click
-coordinates hit 4 of 5 test targets, including Treechat's unlabeled menu
-button. Asking a model for "x,y" in plain text was off by 100px or more.
-Haiku 4.5 has no computer use. Set `JEVB_LOCATE_MODEL` to use another model.
+Controls the tree can't identify, whether unnamed or missing because they're
+a clickable div with no role, are a last resort. When Jev finds no confident
+match on an app screen, jevb asks Claude Sonnet 5 with the computer-use toolset
+where on the screenshot to tap. If the point falls inside a tree element, jevb
+taps that element's center; otherwise it taps the point (target `visual`). It
+runs only when `ANTHROPIC_API_KEY` is set (env or `./.env`) and costs about 6k
+tokens (~1-2 cents) and 1.5-4s per use. Measured: toolset clicks hit 4 of 5
+test targets, including Treechat's unlabeled menu button. Plain "give me x,y"
+prompting was off by 100px or more. Having Haiku label the unnamed controls
+first was tried and dropped: it got 3-4 of 8 right, and one confident wrong
+label led to a wrong tap. Set `JEVB_LOCATE_MODEL` to use another model.
 
 In scenarios:
 

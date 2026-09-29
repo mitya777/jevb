@@ -37,6 +37,14 @@ test('a control missing from the tree is tapped where Claude points on the scree
         assert.match(seen.messages[0].content[0].text, /open the sidebar menu/)
         assert.deepEqual([found.el.x, found.el.y], [15, 50], 'screenshot pixels scaled to screen points')
         assert.equal(found.target.visual, true)
+
+        // A point inside a tree element taps that element (exact bounds).
+        const snap = { elements: [
+            { id: 'e1', desc: 'image "Image" at 6,40', x: 22, y: 56, rect: { x: 6, y: 40, w: 32, h: 32 } },
+            { id: 'e2', desc: 'other "Header" at 0,30', x: 195, y: 60, rect: { x: 0, y: 30, w: 390, h: 60 } },
+        ] }
+        const snapped = await new JevDevice().locateVisually(s, 'open the sidebar menu', snap)
+        assert.equal(snapped.el.id, 'e1', 'the smallest element containing the point')
     } finally {
         server.close()
     }

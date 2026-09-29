@@ -1,0 +1,63 @@
+# Logged-in tour of the Treechat app on a real phone: feed, tabs, posts,
+# search, notifications, sidebar, channels. Read-only: never posts, replies,
+# joins or upvalues (use a test account with no sats). The account comes from
+# the environment (or ./.env): TREECHAT_EMAIL, TREECHAT_PASSWORD.
+#   jevb run examples/tour-treechat-app-loggedin.jevb --device "pixel 9" --app treechat.apk --pace agent
+
+open
+act? dismiss the notifications permission prompt without allowing
+check is this a login page?
+type the email field => ${TREECHAT_EMAIL}
+type the password field => ${TREECHAT_PASSWORD}
+press HideKeyboard
+act log in
+refute is an error or "wrong password" message shown?
+check is the user logged in, with a stream of posts shown?
+
+# The feed
+scroll 1500
+check are posts shown?
+scroll -1500
+act? switch the feed to Hot
+check are posts shown?
+act? switch the feed back to Now
+act? switch to the Following tab
+act? switch back to the Public tab
+
+# Open a post and come back
+act open the first post in the feed by tapping its text
+check is a single post or conversation thread shown?
+press Back
+check is the home feed shown?
+scroll 1200
+act open a post by tapping its text
+check is a single post or conversation thread shown?
+scroll 800
+press Back
+
+# Search
+act open search
+type the search field => ordinals
+press Enter
+check are search results shown?
+press Back
+
+# Notifications
+act open notifications
+check are notifications shown?
+press Back
+
+# Sidebar: channels, memes, home
+act open the sidebar menu
+act open the Channels page
+check is a list of channels shown?
+act open the first channel in the list
+check is a channel's stream of posts shown?
+scroll 1200
+press Back
+act open the sidebar menu
+act? open Memes
+check is a page of memes shown?
+act open the sidebar menu
+act go to Home
+check is the home feed shown?

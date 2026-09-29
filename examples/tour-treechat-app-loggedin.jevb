@@ -12,7 +12,12 @@ type the password field => ${TREECHAT_PASSWORD}
 press HideKeyboard
 act log in
 refute is an error or "wrong password" message shown?
-check is the user logged in, with a stream of posts shown?
+check is the user logged in?
+
+# The app reopens wherever this account last was (a Channels page, say):
+# start from the home feed.
+act go to the Home feed with the house icon in the bottom bar
+check is the home feed with posts shown?
 
 # The feed
 scroll 1500

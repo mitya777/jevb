@@ -3,6 +3,7 @@
 // (fresh) on the next one. Sessions are named browser contexts.
 import { chromium } from 'playwright-core'
 import { OVERLAY } from './demo.mjs'
+import { ReplayCache, pageKey } from './cache.mjs'
 import { judge } from './judge.mjs'
 import * as pace from './pace.mjs'
 import { pageState, shortlist, snapshot } from './snapshot.mjs'
@@ -16,8 +17,9 @@ const CDP_URL = process.env.JEVB_CDP_URL || null
 export class JevBrowser {
     constructor({ idleMs = DEFAULT_IDLE_MS, pace: p, headless = process.env.JEVB_HEADED !== '1',
         viewport = { width: 1280, height: 800 }, minConfidence = 0.5, log = () => {},
-        demo = process.env.JEVB_DEMO === '1', videoDir = process.env.JEVB_VIDEO || null, cdpUrl = CDP_URL } = {}) {
-        Object.assign(this, { idleMs, headless, viewport, minConfidence, log, demo, videoDir, cdpUrl })
+        demo = process.env.JEVB_DEMO === '1', videoDir = process.env.JEVB_VIDEO || null, cdpUrl = CDP_URL,
+        cache = ReplayCache.fromEnv() } = {}) {
+        Object.assign(this, { idleMs, headless, viewport, minConfidence, log, demo, videoDir, cdpUrl, cache })
         this.step = ''
         this.jevRequests = 0
         this.jevTokens = { input: 0, output: 0 }
@@ -135,6 +137,7 @@ export class JevBrowser {
             options: async () => shortlist(await snapshot(page), intent),
             state: () => pageState(page),
             where: async () => ({ url: page.url(), title: await page.title() }),
+            cache: this.cache, page: pageKey(page.url()), minConfidence: this.minConfidence,
         })
         this.jevRequests += res.requests
         this.jevTokens.input += res.usage.input

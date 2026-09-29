@@ -22,11 +22,22 @@
 // `runScenario(file, { device, app })` (CLI: --device/--app) presets them,
 // so one scenario runs on any phone.
 //
+// Reusable actions: `do NAME key=value ...` runs actions/NAME.mjs (code,
+// e.g. Playwright: export async function browser({ page, args, jevb })) when
+// it exists for this backend, else actions/NAME.jevb (steps; ${key} is an
+// argument). A failing block falls back to the .jevb. See findAction.
+//
+//   do login email=${TEST_EMAIL} password=${TEST_PASSWORD}
+//
+// Picks and checks replay from the cache (cache.mjs) when the screen allows.
+//
 // Exit code is non-zero if any check fails or any step throws. Consecutive
 // checks are batched into one Jev request (see runScenario).
 import fs from 'node:fs'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { JevBrowser } from './browser.mjs'
+import { ReplayCache } from './cache.mjs'
 import { JevDevice } from './device.mjs'
 import { apiKey } from './jev.mjs'
 
@@ -68,15 +79,19 @@ function redact(result) {
     return JSON.parse(json)
 }
 
-export async function runScenario(file, { pace, baseUrl, batch = true, onStep = console.log, device, app } = {}) {
+export async function runScenario(file, { pace, baseUrl, batch = true, onStep = console.log, device, app, cache, actionDirs = [] } = {}) {
     if (fs.existsSync('.env')) { try { process.loadEnvFile('.env') } catch {} }
     const steps = parse(fs.readFileSync(file, 'utf8'))
+    const dirs = actionPaths(file, actionDirs)
     // Fail before renting a phone: a missing key or ${NAME} used to surface
     // only at the first Jev call, after ~2 billed device minutes.
     apiKey()
-    for (const s of steps) if (s.cmd === 'type') expand(s.arg.split(/\s*=>\s*/)[1] ?? '')
+    preflight(steps, dirs)
     const onDevice = !!(device || app) || steps.some((s) => ['device', 'app', 'platform'].includes(s.cmd))
-    const b = onDevice ? new JevDevice({ pace, log: (m) => onStep({ log: m }) }) : new JevBrowser({ pace, idleMs: 10 * 60_000 })
+    // cache: undefined = JEVB_CACHE (default .jevb/cache.json), false = off.
+    const replay = cache === false ? null : cache || ReplayCache.fromEnv()
+    if (replay) replay.secrets = secretValues // typed secrets must never reach the cache file
+    const b = onDevice ? new JevDevice({ pace, log: (m) => onStep({ log: m }), cache: replay }) : new JevBrowser({ pace, idleMs: 10 * 60_000, cache: replay })
     const deviceOpts = { ...(device && { device }), ...(app && { app }) } // consumed by the next open
     const target = (arg) => (arg && baseUrl ? new URL(arg, baseUrl).href : arg || undefined)
     const results = []
@@ -84,12 +99,16 @@ export async function runScenario(file, { pace, baseUrl, batch = true, onStep = 
     const started = Date.now()
     let lastWorkEnd = started // end of the last non-wait step: trailing waits don't count
     const emit = (r) => { r = redact(r); results.push(r); onStep(r) }
-    const emitChecks = (checkSteps, checkResults, ms) => checkSteps.forEach((cs, i) => {
-        const c = checkResults[i]
-        if (!c.pass) failed++
-        emit({ line: cs.line, step: cs.src, ms, ...c })
-    })
-    try {
+
+    // Runs steps in order; returns false after an error (later steps depend
+    // on page state). `via` names the action a step came from.
+    async function runSteps(steps, via = '') {
+        const label = (x) => (via ? `${via} › ${x.src}` : x.src)
+        const emitChecks = (checkSteps, checkResults, ms) => checkSteps.forEach((cs, i) => {
+            const c = checkResults[i]
+            if (!c.pass) failed++
+            emit({ line: cs.line, step: label(cs), ms, ...c })
+        })
         for (let i = 0; i < steps.length; i++) {
             let s = steps[i]
             let pending = []
@@ -100,7 +119,7 @@ export async function runScenario(file, { pace, baseUrl, batch = true, onStep = 
                 if (!s) i-- // no action to ride along with: the checks go alone
             }
             const t = Date.now()
-            b.step = [...pending, ...(s ? [s] : [])].map((x) => x.src).join('\n  + ')
+            b.step = [...pending, ...(s ? [s] : [])].map(label).join('\n  + ')
             if (b.demo && b.sessions.size) await b.hud(await b.page().catch(() => null)).catch(() => {})
             let out
             const checks = pending.map(toCheck)
@@ -130,6 +149,7 @@ export async function runScenario(file, { pace, baseUrl, batch = true, onStep = 
                     case 'scroll': out = await b.scroll(s.arg || 600); break
                     case 'wait': await new Promise((r) => setTimeout(r, Number(s.arg))); out = {}; break
                     case 'shot': fs.mkdirSync(path.dirname(s.arg), { recursive: true }); out = await b.screenshot(s.arg); break
+                    case 'do': out = await runAction(s, via); break
                     default: throw new Error(`unknown step "${s.cmd}"`)
                 }
             } catch (e) {
@@ -142,9 +162,46 @@ export async function runScenario(file, { pace, baseUrl, batch = true, onStep = 
             if (s.cmd !== 'wait') lastWorkEnd = Date.now()
             const { checks: checkResults, ...rest } = out
             if (pending.length && checkResults) emitChecks(pending, checkResults, Date.now() - t)
-            emit({ line: s.line, step: s.src, ms: Date.now() - t, ...rest })
-            if (out.error) break // later steps depend on page state; stop at first error
+            emit({ line: s.line, step: label(s), ms: Date.now() - t, ...rest })
+            if (out.error) return false
         }
+        return true
+    }
+
+    // `do NAME k=v ...`: a code block (NAME.mjs, e.g. Playwright) when one
+    // exists for this backend, else the plain-language steps in NAME.jevb.
+    // A block that throws falls back to NAME.jevb when there is one.
+    async function runAction(s, via) {
+        const { name, args } = parseDo(s.arg)
+        const chain = via ? `${via} › ${name}` : name
+        if (chain.split(' › ').length > 8) throw new Error(`actions nested too deep: ${chain}`)
+        const found = findAction(name, dirs)
+        const values = Object.fromEntries(Object.entries(args).map(([k, v]) => [k, expand(v)]))
+        let blockError = null
+        if (found.block) {
+            const mod = await import(pathToFileURL(found.block).href)
+            const fn = onDevice ? mod.device : mod.browser || mod.default
+            if (fn) {
+                try {
+                    const ctx = onDevice
+                        ? { jevb: b, session: b.session(), wd: b.session().wd, args: values }
+                        : { jevb: b, page: await b.page(), args: values }
+                    const res = await fn(ctx)
+                    return { action: name, ran: path.basename(found.block), ...(res && typeof res === 'object' && res) }
+                } catch (e) {
+                    if (!found.steps) throw e
+                    blockError = e.message
+                }
+            }
+        }
+        if (!found.steps) throw new Error(`action "${name}": ${found.block ? `${path.basename(found.block)} has no ${onDevice ? 'device' : 'browser'} export` : 'not found'} (looked in ${dirs.join(', ')})`)
+        const sub = actionSteps(found.steps, values)
+        const ok = await runSteps(sub, chain)
+        return { action: name, ran: path.basename(found.steps), ...(blockError && { fallback: `block failed: ${blockError}` }), ...(!ok && { error: `action "${name}" failed` }) }
+    }
+
+    try {
+        await runSteps(steps)
         if (b.demo) {
             const secs = ((lastWorkEnd - started) / 1000).toFixed(2)
             await b.showDone(failed ? `FAILED  ${failed}  ·  ${secs}s` : `DONE  ${secs}s`)
@@ -152,6 +209,59 @@ export async function runScenario(file, { pace, baseUrl, batch = true, onStep = 
         }
     } finally {
         var { videos } = await b.shutdown('scenario done')
+        replay?.save()
     }
-    return { failed, results, videos, jevCalls: b.jevRequests, jevTokens: b.jevTokens, totalMs: lastWorkEnd - started }
+    return { failed, results, videos, jevCalls: b.jevRequests, jevTokens: b.jevTokens, cacheHits: replay ? { ...replay.hits } : null, totalMs: lastWorkEnd - started }
+}
+
+// ---- actions ---------------------------------------------------------------
+
+// Where `do NAME` looks: actions/ next to the scenario, .jevb/actions in the
+// working directory, then JEVB_ACTIONS (colon-separated) and actionDirs.
+function actionPaths(file, extra) {
+    return [...new Set([
+        path.join(path.dirname(path.resolve(file)), 'actions'),
+        path.resolve('.jevb/actions'),
+        ...(process.env.JEVB_ACTIONS || '').split(':').filter(Boolean).map((d) => path.resolve(d)),
+        ...extra.map((d) => path.resolve(d)),
+    ])]
+}
+
+export function findAction(name, dirs) {
+    if (!/^[\w-]+$/.test(name)) throw new Error(`bad action name "${name}"`)
+    const first = (ext) => dirs.map((d) => path.join(d, `${name}.${ext}`)).find((f) => fs.existsSync(f)) || null
+    return { block: first('mjs'), steps: first('jevb') }
+}
+
+// do NAME key=value key="value with spaces" key=${ENV_NAME}
+export function parseDo(arg) {
+    const [name, ...rest] = arg.trim().split(/\s+/)
+    const args = {}
+    for (const m of rest.join(' ').matchAll(/(\w+)=(?:"([^"]*)"|(\S+))/g)) args[m[1]] = m[2] ?? m[3]
+    return { name, args }
+}
+
+// An action file's steps with its ${param}s filled in. Lower-case names are
+// parameters; upper-case ${NAME}s stay environment lookups (expanded later).
+export function actionSteps(file, values) {
+    const text = fs.readFileSync(file, 'utf8')
+    const rel = path.basename(file)
+    return parse(text.replace(/\$\{([a-z][\w]*)\}/g, (_, k) => {
+        if (!(k in values)) throw Object.assign(new Error(`${rel}: missing argument ${k}`), { code: 'MISSING_ARG' })
+        return values[k]
+    })).map((s) => ({ ...s, line: `${rel}:${s.line}` }))
+}
+
+// Everything that can fail before the first (possibly billed) step: env
+// variables in type steps and action arguments, and that actions exist.
+function preflight(steps, dirs, seen = new Set()) {
+    for (const s of steps) {
+        if (s.cmd === 'type') expand(s.arg.split(/\s*=>\s*/)[1] ?? '')
+        if (s.cmd !== 'do') continue
+        const { name, args } = parseDo(s.arg)
+        const values = Object.fromEntries(Object.entries(args).map(([k, v]) => [k, expand(v)]))
+        const found = findAction(name, dirs)
+        if (!found.block && !found.steps) throw Object.assign(new Error(`action "${name}" not found (looked in ${dirs.join(', ')})`), { code: 'NO_ACTION' })
+        if (found.steps && !seen.has(name)) preflight(actionSteps(found.steps, values), dirs, new Set([...seen, name]))
+    }
 }

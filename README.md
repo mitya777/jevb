@@ -242,6 +242,15 @@ Jev's answers are saved, so a repeat run only asks Jev about what changed.
   the text or fields is a miss. Only hashes are stored, never page text or
   typed values, and a pick whose label contains a `${NAME}` secret is never saved.
 
+- **Parameterized picks.** A step inside an action (`act switch the feed to ${tab}`)
+  is cached as its template. Argument values in the fingerprint become
+  placeholders (`clickable "${tab}"`, and the href is dropped, since it usually
+  repeats the value in another form). `do feed tab=Hot` records once, and
+  `tab=Now` then replays with no Jev call. Values are never stored, so secret
+  arguments are safe. When a value renders differently (Treechat's Top tab is a
+  `button`, while Hot and Now are clickable divs), Jev is asked once and both
+  shapes are kept.
+
 The file is `.jevb/cache.json` in the working directory (`JEVB_CACHE=path`
 moves it, `JEVB_CACHE=off` or `jevb run --no-cache` disables it). Commit it
 if CI should replay too. Results mark replayed steps `cached: true`, and

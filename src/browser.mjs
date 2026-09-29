@@ -132,13 +132,13 @@ export class JevBrowser {
     }
 
     // Jev judgments for one page state (see judge.mjs).
-    async judge(page, { intent, checks = [] } = {}) {
+    async judge(page, { intent, checks = [], template } = {}) {
         const res = await judge({
             intent, checks,
             options: async () => shortlist(await snapshot(page), intent),
             state: () => pageState(page),
             where: async () => ({ url: page.url(), title: await page.title() }),
-            cache: this.cache, page: pageKey(page.url()), minConfidence: this.minConfidence,
+            cache: this.cache, page: pageKey(page.url()), minConfidence: this.minConfidence, template,
         })
         this.jevRequests += res.requests
         this.jevTokens.input += res.usage.input
@@ -150,18 +150,18 @@ export class JevBrowser {
     // Jev picks which element an intent refers to. Low confidence or "none"
     // throws with the top candidates (and any batched check results) so the
     // calling agent can rephrase.
-    async find(intent, { session, checks } = {}) {
+    async find(intent, { session, checks, template } = {}) {
         const page = await this.page(session)
-        const { target, checks: checkResults } = await this.judge(page, { intent, checks })
+        const { target, checks: checkResults } = await this.judge(page, { intent, checks, template })
         if (target.id === 'none' || target.confidence < this.minConfidence) {
             throw Object.assign(new Error(`no confident match for "${intent}"`), { code: 'NO_MATCH', detail: target, checks: checkResults })
         }
         return { page, locator: page.locator(`[data-jevb="${target.id}"]`), target, checks: checkResults }
     }
 
-    async act(intent, { session, pace: p, checks } = {}) {
+    async act(intent, { session, pace: p, checks, template } = {}) {
         const pc = pace.resolvePace(p || this.pace)
-        const { page, locator, target, checks: checkResults } = await this.find(intent, { session, checks })
+        const { page, locator, target, checks: checkResults } = await this.find(intent, { session, checks, template })
         // Some clicks navigate a beat later (after an analytics call, say).
         // Watch for a main-frame navigation request and wait it out. A
         // navigation *request* comes before the new document commits, and
@@ -207,9 +207,9 @@ export class JevBrowser {
         return { clicked: target, url: page.url(), checks: checkResults }
     }
 
-    async type(intent, text, { session, pace: p, submit = false, checks } = {}) {
+    async type(intent, text, { session, pace: p, submit = false, checks, template } = {}) {
         const pc = pace.resolvePace(p || this.pace)
-        const { page, locator, target, checks: checkResults } = await this.find(intent, { session, checks })
+        const { page, locator, target, checks: checkResults } = await this.find(intent, { session, checks, template })
         await pace.type(page, locator, text, pc)
         if (submit) { await pace.press(page, 'Enter', pc); await pace.settle(page, pc) }
         return { typed: target, chars: text.length, checks: checkResults }

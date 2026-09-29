@@ -168,3 +168,34 @@ test('a missing action or argument fails before anything runs', async () => {
     await assert.rejects(run(dir, `open ${fixture}\ndo nope\n`, { cache: false }), /action "nope" not found/)
     await assert.rejects(run(dir, `open ${fixture}\ndo reply\n`, { cache: false }), /missing argument text/)
 })
+
+test('picks inside an action replay for any argument value', async () => {
+    const dir = tmp()
+    fs.mkdirSync(path.join(dir, 'actions'))
+    fs.writeFileSync(path.join(dir, 'actions', 'nav.jevb'), 'act open the ${section} link\n')
+    const cache = () => new ReplayCache(path.join(dir, 'cache.json'))
+
+    reset()
+    assert.equal((await run(dir, `open ${fixture}\ndo nav section=Home\n`, { cache: cache() })).failed, 0)
+    assert.equal(calls.choice, 1)
+    const saved = JSON.parse(fs.readFileSync(path.join(dir, 'cache.json'), 'utf8'))
+    assert.deepEqual(saved.picks, { [`${pageKey(fixture)} open the \${section} link`]: [{ fp: 'a "${section}"', confidence: 0.9 }] })
+
+    reset()
+    const other = await run(dir, `open ${fixture}\ndo nav section=Settings\n`, { cache: cache() })
+    assert.equal(other.failed, 0)
+    assert.equal(calls.choice, 0, 'a new value replays the template')
+    const step = other.results.find((r) => r.step === 'nav › act open the Settings link')
+    assert.equal(step.clicked.cached, true)
+    assert.match(step.url, /#settings$/)
+})
+
+test('argument values are never stored, even when they are secrets', () => {
+    const c = new ReplayCache(path.join(tmp(), 'c.json'))
+    c.secrets.add('s3cret-user')
+    const els = [{ id: 'e1', desc: 'clickable "s3cret-user" at 0,0' }]
+    const template = { intent: 'open the profile of ${who}', values: { who: 's3cret-user' } }
+    c.rememberPick('p', 'open the profile of s3cret-user', { desc: els[0].desc, confidence: 0.9 }, els, template)
+    assert.deepEqual(c.data.picks, { 'p open the profile of ${who}': [{ fp: 'clickable "${who}"', confidence: 0.9 }] })
+    assert.equal(c.pick('p', 'open the profile of s3cret-user', els, template).el.id, 'e1')
+})

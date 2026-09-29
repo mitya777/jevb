@@ -12,11 +12,12 @@
 //              (a string, or an async function when it costs a round trip).
 //              A cached pick or check skips its Jev request. Only picks the
 //              caller would accept (>= minConfidence) are remembered.
+//   template:  { intent, values } for a step from a parameterized action.
 import { ask } from './jev.mjs'
 
 const checkInstructions = (q) => `The user currently sees \`viewport_text\` (only the modal, when \`modal_open\` is true) and form \`fields\`. Judge what the user sees now: ${q}`
 
-export async function judge({ intent, checks = [], options, state, where, cache = null, page = '', minConfidence = 0.5 }) {
+export async function judge({ intent, checks = [], options, state, where, cache = null, page = '', minConfidence = 0.5, template = null }) {
     let criteria, opts, pageId, cachedPick = null
     const choiceReq = intent && (async () => {
         if (cache) pageId = typeof page === 'function' ? await page() : page
@@ -24,7 +25,7 @@ export async function judge({ intent, checks = [], options, state, where, cache 
         if (!opts.length) throw Object.assign(new Error('no interactive elements on screen'), { code: 'NO_ELEMENTS' })
         criteria = Object.fromEntries(opts.map((e) => [e.id, e.desc]))
         criteria.none = 'No element on the page matches the intent'
-        cachedPick = cache?.pick(pageId, intent, opts)
+        cachedPick = cache?.pick(pageId, intent, opts, template)
         if (cachedPick) return null
         return ask({ intent, page: await where() },
             { target: { type: 'choice', instructions: 'Which page element should a user interact with to accomplish `intent`?', criteria } })
@@ -95,7 +96,7 @@ export async function judge({ intent, checks = [], options, state, where, cache 
             const sum = likely.reduce((acc, [, p]) => acc + p, 0)
             Object.assign(target, { id: pick, desc: criteria[pick], confidence: +sum.toFixed(3), ordinal: order > 0 ? 'first' : 'last' })
         }
-        if (cache && target.id !== 'none' && target.confidence >= minConfidence) cache.rememberPick(pageId, intent, target, opts)
+        if (cache && target.id !== 'none' && target.confidence >= minConfidence) cache.rememberPick(pageId, intent, target, opts, template)
     }
 
     const lines = checkResults.map((c) => `${c.negate ? 'refute' : 'check'} ${c.noul.toFixed(2)} ${c.pass ? 'PASS ✓' : 'FAIL ✗'}  ${c.question}`)

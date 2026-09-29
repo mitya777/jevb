@@ -139,10 +139,10 @@ export async function runScenario(file, { pace, baseUrl, batch = true, onStep = 
                         out = await b.open(target(s.arg), opts)
                         break
                     }
-                    case 'act': out = await b.act(s.arg, { checks }); break
+                    case 'act': out = await b.act(s.arg, { checks, template: s.template }); break
                     case 'type': {
                         const [intent, text] = s.arg.split(/\s*=>\s*/)
-                        out = await b.type(intent, expand(text ?? ''), { checks })
+                        out = await b.type(intent, expand(text ?? ''), { checks, template: s.template })
                         break
                     }
                     case 'press': out = await b.press(s.arg); break
@@ -243,13 +243,20 @@ export function parseDo(arg) {
 
 // An action file's steps with its ${param}s filled in. Lower-case names are
 // parameters; upper-case ${NAME}s stay environment lookups (expanded later).
+// Each step keeps its unfilled intent (`template`) so the replay cache can
+// store one entry per step, not one per argument value.
 export function actionSteps(file, values) {
-    const text = fs.readFileSync(file, 'utf8')
     const rel = path.basename(file)
-    return parse(text.replace(/\$\{([a-z][\w]*)\}/g, (_, k) => {
+    const fillArgs = (t) => t.replace(/\$\{([a-z][\w]*)\}/g, (_, k) => {
         if (!(k in values)) throw Object.assign(new Error(`${rel}: missing argument ${k}`), { code: 'MISSING_ARG' })
         return values[k]
-    })).map((s) => ({ ...s, line: `${rel}:${s.line}` }))
+    })
+    const intentOf = (s) => (s.cmd === 'type' ? s.arg.split(/\s*=>\s*/)[0] : s.arg)
+    return parse(fs.readFileSync(file, 'utf8')).map((raw) => {
+        const s = { ...raw, src: fillArgs(raw.src), arg: fillArgs(raw.arg), line: `${rel}:${raw.line}` }
+        const intent = intentOf(raw)
+        return /\$\{[a-z]/.test(intent) ? { ...s, template: { intent, values } } : s
+    })
 }
 
 // Everything that can fail before the first (possibly billed) step: env

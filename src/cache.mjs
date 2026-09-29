@@ -8,6 +8,12 @@
 // and its new pick replaces the old one. Works the same for Chromium, mobile
 // web and native app snapshots, since all three describe elements the same way.
 //
+// Parameterized picks: a step from an action (`do open-thread title=Foo`)
+// is cached under its template intent ("open the thread titled ${title}"),
+// with argument values in the fingerprint turned back into placeholders
+// (clickable "${title}"). Another value (title=Bar) replays without Jev, and
+// the values themselves, secrets included, are never stored.
+//
 // Checks: a check's noul is saved under a hash of the question plus the exact
 // state Jev judged (visible text, fields). Same screen, same answer; any
 // change to the screen is a miss. Only hashes are stored, never page text.
@@ -42,6 +48,18 @@ export function pageKey(url) {
     }
 }
 
+// ${name} placeholders <-> argument values. Longest values first, so a value
+// inside another ("Bo" in "Bob") can't split it; 1-char values stay literal.
+const loose = (fp) => fp.replace(/ href=\S+/, '')
+const fill = (fp, values) => (values ? fp.replace(/\$\{(\w+)\}/g, (m, k) => values[k] ?? m) : fp)
+function unfill(fp, values) {
+    if (!values) return fp
+    for (const [k, v] of Object.entries(values).filter(([, v]) => String(v).length > 1).sort((a, b) => String(b[1]).length - String(a[1]).length)) {
+        fp = fp.split(String(v)).join(`\${${k}}`)
+    }
+    return fp
+}
+
 const at = (desc) => desc?.match(/ at (-?\d+),(-?\d+)$/)?.slice(1).map(Number)
 
 export class ReplayCache {
@@ -65,11 +83,14 @@ export class ReplayCache {
     }
 
     // The element to use for `intent`, from this screen's elements, or null.
-    pick(page, intent, elements) {
-        const entries = this.data.picks[`${page} ${intent}`]
+    // template: { intent, values } when the step came from an action.
+    pick(page, intent, elements, template = null) {
+        const entries = this.data.picks[`${page} ${template?.intent ?? intent}`]
         if (!entries) return null
         for (const e of entries) {
-            const matches = elements.filter((el) => fingerprint(el.desc) === e.fp)
+            const fp = fill(e.fp, template?.values)
+            const own = e.fp.includes('${') ? (el) => loose(fingerprint(el.desc)) : (el) => fingerprint(el.desc)
+            const matches = elements.filter((el) => own(el) === fp)
             let el = matches.length === 1 ? matches[0] : null
             // "the first Reply button": topmost/bottommost of the identical ones.
             if (matches.length > 1 && e.ordinal) {
@@ -84,13 +105,19 @@ export class ReplayCache {
         return null
     }
 
-    rememberPick(page, intent, target, elements) {
+    rememberPick(page, intent, target, elements, template = null) {
         const fp = fingerprint(target.desc || '')
-        const key = `${page} ${intent}`
-        if (!fp || this.leaks(key) || this.leaks(fp)) return
+        const key = `${page} ${template?.intent ?? intent}`
+        // A templated fingerprint drops the href: it usually holds the value
+        // in another form (a "Home" link to #home), which no template matches.
+        let stored = unfill(fp, template?.values)
+        const templated = stored !== fp
+        if (templated) stored = loose(stored)
+        if (!fp || this.leaks(key) || this.leaks(stored)) return
         // Only a pick replay can find again unambiguously: a unique element,
         // or "the first/last X" that really is the topmost/bottommost X.
-        const same = elements.filter((el) => fingerprint(el.desc) === fp)
+        const own = templated ? (el) => loose(fingerprint(el.desc)) : (el) => fingerprint(el.desc)
+        const same = elements.filter((el) => own(el) === own({ desc: target.desc }))
         let ordinal = target.ordinal
         if (!ordinal && same.length > 1) {
             const word = /\b(first|top(most)?)\b/i.test(intent) ? 'first' : /\b(last|bottom(most)?)\b/i.test(intent) ? 'last' : null
@@ -98,10 +125,10 @@ export class ReplayCache {
             if (word && y === (word === 'first' ? Math.min(...ys) : Math.max(...ys))) ordinal = word
         }
         if (!ordinal && same.length !== 1) return
-        const entry = { fp, confidence: target.confidence, ...(ordinal && { ordinal }) }
+        const entry = { fp: stored, confidence: target.confidence, ...(ordinal && { ordinal }) }
         const old = this.data.picks[key] || []
-        if (old[0]?.fp === fp && old[0]?.ordinal === ordinal) return
-        this.data.picks[key] = [entry, ...old.filter((e) => e.fp !== fp)].slice(0, MAX_FPS)
+        if (old[0]?.fp === stored && old[0]?.ordinal === ordinal) return
+        this.data.picks[key] = [entry, ...old.filter((e) => e.fp !== stored)].slice(0, MAX_FPS)
         this.dirty.picks.add(key)
     }
 

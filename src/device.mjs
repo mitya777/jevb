@@ -223,7 +223,7 @@ export class JevDevice {
         await sleep(Math.min(2500, 400 + cur.snap.state.viewport_text.length / 8))
     }
 
-    async judge(s, { intent, checks = [], snap }) {
+    async judge(s, { intent, checks = [], snap, template }) {
         // One read shared by the choice and the checks (they run in parallel):
         // each read renumbers the page's elements, so two reads of a changing
         // page gave the pick an id from one and the lookup the other.
@@ -236,7 +236,7 @@ export class JevDevice {
             where: async () => ({ platform: s.platform, device: s.device, ...(s.webContext && { browser: s.platform === 'ios' ? 'Safari' : 'Chrome', url: await s.wd.currentUrl() }) }),
             // Native screens have no url: the fingerprint match does the work.
             cache: this.cache, page: async () => (s.webContext ? `${s.platform} ${pageKey(await s.wd.currentUrl())}` : `${s.platform} app`),
-            minConfidence: this.minConfidence,
+            minConfidence: this.minConfidence, template,
         })
         this.jevRequests += res.requests
         this.jevTokens.input += res.usage.input
@@ -245,15 +245,15 @@ export class JevDevice {
         return { target: res.target, el, checks: res.checks, snap: await snapP }
     }
 
-    async find(intent, { session, checks } = {}) {
+    async find(intent, { session, checks, template } = {}) {
         const s = this.session(session)
-        let { target, el, checks: checkResults, snap } = await this.judge(s, { intent, checks })
+        let { target, el, checks: checkResults, snap } = await this.judge(s, { intent, checks, template })
         const weak = () => target.id === 'none' || target.confidence < this.minConfidence || !el
         // Unlabeled icons (an app's menu button reads as a bare "Button"):
         // have Haiku name them from a screenshot and ask again, once.
         const labeled = weak() && snap && await this.labelUnlabeled(s, snap)
         if (labeled) {
-            ({ target, el } = await this.judge(s, { intent, snap: labeled }))
+            ({ target, el } = await this.judge(s, { intent, snap: labeled, template }))
             target.labeled = labeled.labeled
         }
         if (weak()) {
@@ -431,17 +431,17 @@ export class JevDevice {
         return { device: s.device, platform: s.platform, ...(url && { url }), ...(s.remote && { deviceFarmSession: s.remote.arn, deviceStartMs: s.remote.startMs }) }
     }
 
-    async act(intent, { session, pace: p, checks } = {}) {
+    async act(intent, { session, pace: p, checks, template } = {}) {
         const pc = pace.resolvePace(p || this.pace)
-        const { s, el, target, checks: checkResults } = await this.find(intent, { session, checks })
+        const { s, el, target, checks: checkResults } = await this.find(intent, { session, checks, template })
         await this.tap(s, el, pc)
         await this.settle(s, pc)
         return { tapped: target, checks: checkResults }
     }
 
-    async type(intent, text, { session, pace: p, submit = false, checks } = {}) {
+    async type(intent, text, { session, pace: p, submit = false, checks, template } = {}) {
         const pc = pace.resolvePace(p || this.pace)
-        const { s, el, target, checks: checkResults } = await this.find(intent, { session, checks })
+        const { s, el, target, checks: checkResults } = await this.find(intent, { session, checks, template })
         const tapped = await this.tap(s, el, pc)
         await sleep(pc === 'human' ? rand(300, 600) : 300) // keyboard comes up
         // Web fields and iOS append each element send. UiAutomator2 replaces

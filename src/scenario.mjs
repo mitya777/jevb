@@ -50,11 +50,22 @@ const toCheck = (s) => ({ question: s.arg, threshold: s.threshold, negate: s.cmd
 // ${NAME} in a type step comes from the environment (or ./.env) at run time,
 // so credentials live in secrets, never in scenario files. Results and logs
 // show the step as written (the placeholder), never the value.
+const secretValues = new Set()
 function expand(arg) {
     return arg.replace(/\$\{([A-Z0-9_]+)\}/g, (_, name) => {
         if (process.env[name] == null) throw Object.assign(new Error(`${name} is not set (env or ./.env)`), { code: 'MISSING_ENV' })
+        if (process.env[name].length >= 3) secretValues.add(process.env[name])
         return process.env[name]
     })
+}
+
+// A filled-in value can come back in output, e.g. as a field's value="..." in
+// Jev's candidates (a test account's email did). Blank every one of them.
+function redact(result) {
+    if (!secretValues.size) return result
+    let json = JSON.stringify(result)
+    for (const v of secretValues) json = json.split(JSON.stringify(v).slice(1, -1)).join('***')
+    return JSON.parse(json)
 }
 
 export async function runScenario(file, { pace, baseUrl, batch = true, onStep = console.log, device, app } = {}) {
@@ -72,7 +83,7 @@ export async function runScenario(file, { pace, baseUrl, batch = true, onStep = 
     let failed = 0
     const started = Date.now()
     let lastWorkEnd = started // end of the last non-wait step: trailing waits don't count
-    const emit = (r) => { results.push(r); onStep(r) }
+    const emit = (r) => { r = redact(r); results.push(r); onStep(r) }
     const emitChecks = (checkSteps, checkResults, ms) => checkSteps.forEach((cs, i) => {
         const c = checkResults[i]
         if (!c.pass) failed++

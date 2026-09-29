@@ -28,6 +28,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { JevBrowser } from './browser.mjs'
 import { JevDevice } from './device.mjs'
+import { apiKey } from './jev.mjs'
 
 export function parse(text) {
     return text.split('\n').map((raw, i) => ({ raw, line: i + 1 }))
@@ -59,6 +60,10 @@ function expand(arg) {
 export async function runScenario(file, { pace, baseUrl, batch = true, onStep = console.log, device, app } = {}) {
     if (fs.existsSync('.env')) { try { process.loadEnvFile('.env') } catch {} }
     const steps = parse(fs.readFileSync(file, 'utf8'))
+    // Fail before renting a phone: a missing key or ${NAME} used to surface
+    // only at the first Jev call, after ~2 billed device minutes.
+    apiKey()
+    for (const s of steps) if (s.cmd === 'type') expand(s.arg.split(/\s*=>\s*/)[1] ?? '')
     const onDevice = !!(device || app) || steps.some((s) => ['device', 'app', 'platform'].includes(s.cmd))
     const b = onDevice ? new JevDevice({ pace, log: (m) => onStep({ log: m }) }) : new JevBrowser({ pace, idleMs: 10 * 60_000 })
     const deviceOpts = { ...(device && { device }), ...(app && { app }) } // consumed by the next open

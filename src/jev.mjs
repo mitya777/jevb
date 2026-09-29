@@ -5,7 +5,7 @@ import fs from 'node:fs'
 const ENDPOINT = process.env.TYPESAFE_ENDPOINT || 'https://api.typesafe.ai/v1/systemone'
 const MODEL = process.env.JEV_MODEL || 'jev-latest'
 
-function apiKey() {
+export function apiKey() {
     if (!process.env.TYPESAFEAI_API_KEY && fs.existsSync('.env')) {
         try { process.loadEnvFile('.env') } catch {}
     }

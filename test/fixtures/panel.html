@@ -1,0 +1,10 @@
+<!doctype html><html><head><title>Panel</title>
+<style>html,body{margin:0;height:100%;overflow:hidden;font:16px sans-serif} #feed{height:90vh;overflow-y:auto;scroll-behavior:smooth}</style>
+</head><body>
+<!-- The app scrolls inside a panel, not the document (like Treechat's feed). -->
+<div id="feed"></div>
+<script>
+const feed = document.getElementById('feed')
+for (let i = 1; i <= 120; i++) { const p = document.createElement('p'); p.textContent = 'Post number ' + i; feed.append(p) }
+</script>
+</body></html>

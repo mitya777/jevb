@@ -1,0 +1,31 @@
+<!doctype html><html><head><title>Controls</title>
+<style>body{font:16px sans-serif;margin:0} .row{cursor:pointer;padding:8px} .banner{position:fixed;bottom:0;left:0;right:0;height:40px;background:#eee}</style>
+</head><body>
+<!-- Snapshot cases: each control has one expected description (see snapshot test). -->
+<nav>
+  <a href="/next.html">Home</a>
+  <button aria-label="Notifications">🔔</button>
+  <button class="sidebar-button"><svg class="lucide lucide-menu" width="20" height="20"><rect width="20" height="20"/></svg></button>
+  <button title="Search threads"><svg width="20" height="20"><rect width="20" height="20"/></svg></button>
+</nav>
+<!-- React-style clickable rows: pointer divs with nested pointer spans. -->
+<div class="row" onclick="void 0"><span style="cursor:pointer">Channels</span></div>
+<div class="row" onclick="void 0"><div style="cursor:pointer"><span>Hot</span></div></div>
+<!-- A pointer div wrapping a real control is not listed twice. -->
+<div class="row"><button>Follow</button></div>
+<!-- Field labelled by a sibling div instead of <label for>. -->
+<div><div>Display name</div><div><input id="dn"></div></div>
+<label>Password <input type="password" value="hunter2"></label>
+<!-- Invisible or inert: never offered. -->
+<button style="display:none">Hidden button</button>
+<button style="visibility:hidden">Invisible button</button>
+<div aria-hidden="true"><button>Aria hidden button</button></div>
+<button disabled>Disabled button</button>
+<!-- A panel root with tabindex wrapping controls is not itself an option. -->
+<div tabindex="0"><button>Inside panel</button></div>
+<!-- Covered by the fixed banner: not clickable now. -->
+<button style="position:fixed;bottom:10px;left:10px">Covered button</button>
+<div class="banner">Cookie banner</div>
+<div style="height:2000px"></div>
+<a href="/far">Far link</a>
+</body></html>

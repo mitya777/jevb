@@ -158,6 +158,29 @@ Things specific to phones:
 `JEVB_APPIUM_URL=http://127.0.0.1:4723` (plus `JEVB_APPIUM_UDID`) uses a local
 Appium server instead: a simulator, an emulator or a USB phone, at no cost.
 
+## Testing jevb itself
+
+```bash
+npm test            # offline, ~25s: real headless Chromium + a fake Jev, no key, no cost
+npm run test:live   # the same fixture pages judged by the real Jev (needs TYPESAFEAI_API_KEY)
+```
+
+`test/harness` starts two local servers. One serves the fixture pages in
+`test/fixtures`, whose cases include modals, pointer-div rows, icon-only
+buttons, covered and offscreen controls, and delayed renders and navigations.
+The other is a fake Jev that answers deterministically and records every
+request, so tests can assert what jevb sent: the pick request carries no page
+text, checks see no offscreen text, and passwords are masked.
+
+With the fake, a `"quoted label"` in an intent pins the pick. For example,
+`act click the last "Reply" button` picks a button labelled Reply. For checks,
+every quoted phrase in the question must be on screen. `jev.answer(fn)`
+overrides any single answer.
+
+`test:live` prints each case's confidence (noul) next to its threshold, so a
+drift in `jev-latest` shows up before a case flips. Known weak spots run as
+TODO and don't fail the suite.
+
 ## Scenarios (for tests)
 
 ```

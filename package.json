@@ -39,7 +39,8 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test"
+    "test": "node --test test/*.test.mjs",
+    "test:live": "JEVB_LIVE=1 node --test test/live/*.test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.129.0",

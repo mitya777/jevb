@@ -1,0 +1,20 @@
+<!doctype html><html><head><title>State</title>
+<style>body{font:16px sans-serif;margin:0} .overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none} .panel{background:#fff;width:50%;margin:20vh auto;padding:20px}</style>
+</head><body>
+<main>
+  <h1>Visible heading</h1>
+  <p style="opacity:0">Transparent text</p>
+  <input aria-label="Email" value="a@b.co">
+  <input type="password" aria-label="Password" value="hunter2">
+  <input type="password" aria-label="Empty password">
+  <label><input type="checkbox" checked> Remember me</label>
+  <div contenteditable="true" aria-label="Reply editor">Draft reply</div>
+  <input type="hidden" name="csrf" value="tok">
+  <button onclick="document.querySelector('dialog').showModal()">Open dialog</button>
+  <button onclick="document.querySelector('.overlay').style.display='block'">Open overlay</button>
+  <div style="height:3000px"></div>
+  <p>Footer below the fold</p>
+</main>
+<dialog><p>Confirm delete?</p><input aria-label="Reason" value="spam"><button>Delete</button></dialog>
+<div class="overlay"><div class="panel"><p>Sign up to reply</p><button>Join</button></div></div>
+</body></html>

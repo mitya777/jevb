@@ -54,3 +54,14 @@ test('run: a scenario file exits 0 and reports Jev usage', async () => {
     assert.equal(done.failed, 0)
     assert.equal(done.jevCalls, 2)
 })
+
+test('upload resolves files against the caller cwd; a missing file exits 1', async () => {
+    fs.writeFileSync(path.join(cwd, 'clip.mp4'), 'abcd')
+    await jevb('open', site.url('upload.html'), '--pace', 'agent')
+    const up = await jevb('upload', 'click "Select video"', '--', 'clip.mp4')
+    assert.equal(up.code, 0, up.out)
+    assert.equal((await jevb('check', 'is "Video: clip.mp4 (4)" shown?')).code, 0)
+    const missing = await jevb('upload', 'click "Select video"', '--', 'nope.mp4')
+    assert.equal(missing.code, 1)
+    assert.match(json(missing).error, /no such file/)
+})

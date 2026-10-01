@@ -1,6 +1,9 @@
 // JevBrowser lifecycle and paces on real Chromium, fake Jev.
 import { fakeJev, fixtures } from './harness/index.mjs'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { after, before, test } from 'node:test'
 
 const { JevBrowser } = await import('../src/browser.mjs')
@@ -86,5 +89,21 @@ test('eval runs a function body in the page and returns its value', async () => 
         const { value } = await b.evaluate('return { title: document.title, w: innerWidth > 0 }')
         assert.equal(value.w, true)
         assert.equal(typeof value.title, 'string')
+    } finally { await b.shutdown() }
+})
+
+test('upload: a button that opens the chooser, a visible file input, and a drop zone', async () => {
+    const b = new JevBrowser({ pace: 'agent' })
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jevb-up-'))
+    const clip = path.join(dir, 'clip.mp4'), art = path.join(dir, 'art.png')
+    fs.writeFileSync(clip, 'x'.repeat(10)); fs.writeFileSync(art, 'y'.repeat(3))
+    try {
+        await b.open(site.url('upload.html'))
+        assert.deepEqual((await b.upload('click "Select video"', [clip])).files, ['clip.mp4'])
+        assert.equal((await b.check('is "Video: clip.mp4 (10)" shown?')).pass, true)
+        await b.upload('the "Cover image" field', [art])
+        assert.equal((await b.check('is "Cover: art.png (3)" shown?')).pass, true)
+        // Two file inputs on the page: a drop zone with no chooser can't guess.
+        await assert.rejects(b.upload('the "Drag and drop files here" area', [clip]), { code: 'NO_FILE_INPUT' })
     } finally { await b.shutdown() }
 })

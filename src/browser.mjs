@@ -191,6 +191,31 @@ export class JevBrowser {
         return { typed: target, chars: text.length, checks: checkResults }
     }
 
+    // Jev picks the upload control: a file input, or the button / drop zone
+    // that opens the file chooser (apps hide the real input behind one).
+    // jevb hands the files to whichever chooser opens, so no OS dialog shows.
+    async upload(intent, files, { session, pace: p, checks } = {}) {
+        if (!files?.length) throw new Error('upload needs at least one file after --')
+        const pc = pace.resolvePace(p || this.pace)
+        const { page, locator, target, checks: checkResults } = await this.find(intent, { session, checks })
+        if (await locator.evaluate((el) => el.matches('input[type=file]'))) await locator.setInputFiles(files)
+        else {
+            const chooser = page.waitForEvent('filechooser', { timeout: 5_000 }).catch(() => null)
+            await pace.click(page, locator, pc)
+            const fc = await chooser
+            if (fc) await fc.setFiles(files)
+            else {
+                // A drop zone that opens no chooser: use the page's only file input.
+                const inputs = page.locator('input[type=file]')
+                const n = await inputs.count()
+                if (n !== 1) throw Object.assign(new Error(`"${intent}" opened no file chooser and the page has ${n} file inputs`), { code: 'NO_FILE_INPUT', detail: target })
+                await inputs.setInputFiles(files)
+            }
+        }
+        await pace.settle(page, pc)
+        return { uploaded: target, files: files.map((f) => f.split('/').pop()), checks: checkResults }
+    }
+
     async press(key, { session, pace: p } = {}) {
         const page = await this.page(session)
         await pace.press(page, key, pace.resolvePace(p || this.pace))

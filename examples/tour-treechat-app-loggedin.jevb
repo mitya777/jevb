@@ -36,8 +36,9 @@ check is a single post or conversation thread shown?
 act go back to the feed with the back arrow at the top left
 check is the home feed shown?
 scroll 1200
-act open a post by tapping the text under its author's name, or its card's author row if it has no text
+act open a post by tapping its card's author row (not an embedded tweet, link or image: those open outside the app)
 check is a single post or conversation thread shown?
+refute is a web browser shown instead of the Treechat app?
 scroll 800
 act go back to the feed with the back arrow at the top left
 

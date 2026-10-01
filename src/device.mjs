@@ -511,6 +511,8 @@ export class JevDevice {
     }
 
     // Enter, Back, Home, HideKeyboard (plus Tab/Escape/Backspace on Android).
+    // iOS also has Screenshot, and ScreenshotEditor (take one, then open its
+    // thumbnail in the markup editor, which shares the image itself).
     // iOS has no back button: Back is the left-edge swipe.
     async press(key, { session, pace: p } = {}) {
         const pc = pace.resolvePace(p || this.pace)
@@ -523,6 +525,15 @@ export class JevDevice {
         else await this.native(s, () => this.pressNative(s, key))
         await this.settle(s, pc)
         return { pressed: key }
+    }
+
+    // Bring another installed app (Settings, Photos, ...) to the front.
+    async launch(app, { session, pace: p } = {}) {
+        const s = this.session(session)
+        if (!app) throw new Error('launch needs a bundle id (iOS) or package (Android)')
+        await this.native(s, () => s.wd.execute('mobile: activateApp', [s.platform === 'ios' ? { bundleId: app } : { appId: app }]))
+        await this.settle(s, pace.resolvePace(p || this.pace))
+        return { launched: app }
     }
 
     async pressNative(s, key) {
@@ -542,6 +553,24 @@ export class JevDevice {
             await s.wd.execute('mobile: pressKey', [{ keycode }])
         } else if (key === 'Enter') {
             await s.wd.sendKeysTo(await s.wd.activeElement(), '\n')
+        } else if (key === 'Screenshot' || key === 'ScreenshotEditor') {
+            // The HID consumer "Snapshot" usage: iOS takes a screenshot, as
+            // from side + volume up.
+            await s.wd.execute('mobile: performIoHidEvent', [{ page: 0x0c, usage: 0x65, durationSeconds: 0.05 }])
+            if (key === 'ScreenshotEditor') {
+                // The thumbnail sits bottom-left for ~5s and is SpringBoard's,
+                // outside the app's tree, so tap where it lands. It can take
+                // 1-2s to slide in on a busy host; a second tap lands on the
+                // image inside the opened editor, which does nothing.
+                const { w, h } = s.screen
+                for (const wait of [1500, 1000]) {
+                    await sleep(wait)
+                    await s.wd.actions([{ type: 'pointer', id: 'finger', parameters: { pointerType: 'touch' }, actions: [
+                        { type: 'pointerMove', duration: 0, x: Math.round(w * 0.2), y: Math.round(h * 0.86) },
+                        { type: 'pointerDown', button: 0 }, { type: 'pause', duration: 80 }, { type: 'pointerUp', button: 0 },
+                    ] }])
+                }
+            }
         } else if (key === 'Home') {
             await s.wd.execute('mobile: pressButton', [{ name: 'home' }])
         } else if (key === 'Back') {

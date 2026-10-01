@@ -16,6 +16,7 @@ const ACTIONS = {
     act: (b, a) => b.act(a.intent, a),
     type: (b, a) => b.type(a.intent, a.text, a),
     press: (b, a) => b.press(a.key, a),
+    launch: (b, a) => { if (!b.launch) throw new Error('launch needs a device session'); return b.launch(a.app, a) },
     scroll: (b, a) => b.scroll(a.dy, a),
     check: (b, a) => b.check(a.question, a),
     checks: (b, a) => b.checks(a.checks || [], a),

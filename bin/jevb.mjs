@@ -24,7 +24,9 @@ const USAGE = `jevb <command> [args] [--pace human|agent] [--session NAME]
   devices [--platform ios|android] Device Farm phones you can open
   act <intent...>                  Jev picks the element, then click it
   type <intent...> -- <text...>    Jev picks the field, then type text [--enter]
-  press <key>                      e.g. Enter, Escape, Meta+K
+  press <key>                      e.g. Enter, Escape, Meta+K; on iOS also
+                                   Screenshot, ScreenshotEditor
+  launch <bundle id|package>       bring another app on the phone to the front
   scroll [dy|end|top]              default 600; end/top follow in-app scroll panels
   check <question...>              Jev noul over the page; exit 1 if < --threshold (0.7)
   refute <question...>             inverse check; exit 1 if >= --threshold (0.3)
@@ -116,6 +118,7 @@ async function main() {
         act: { ...common, intent: text },
         type: { ...common, intent: text, text: (rest || []).join(' '), submit: !!flags.enter },
         press: { ...common, key: pos[0] },
+        launch: { ...common, app: pos[0] },
         scroll: { ...common, dy: pos[0] },
         check: { ...common, question: text, threshold: flags.threshold },
         refute: { ...common, question: text, threshold: flags.threshold, negate: true },

@@ -221,6 +221,12 @@ export class JevBrowser {
         return { url: page.url(), title: await page.title(), elements: els.map((e) => e.desc.replace(/^/, `${e.id} `)) }
     }
 
+    // Run a function body in the page; returns what it returns.
+    async evaluate(script, { session } = {}) {
+        const page = await this.page(session)
+        return { value: await page.evaluate(`(() => { ${script} })()`) }
+    }
+
     async screenshot(path, { session, fullPage = false } = {}) {
         const page = await this.page(session)
         await page.screenshot({ path, fullPage })

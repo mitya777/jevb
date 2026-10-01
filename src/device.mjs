@@ -105,7 +105,7 @@ export class JevDevice {
     }
 
     // Provision a device and start an Appium session on it.
-    async start(name, { device, platform, app, url }) {
+    async start(name, { device, platform, app, url, attach = false }) {
         const local = process.env.JEVB_APPIUM_URL
         platform = platform?.toLowerCase() || (/iphone|ipad|ios/i.test(device || '') || /\.ipa$/.test(app || '') ? 'ios' : 'android')
         let remote = null
@@ -127,6 +127,12 @@ export class JevDevice {
         else if (app && local && fs.existsSync(app)) caps['appium:app'] = path.resolve(app)
         else if (app && !fs.existsSync(app) && !app.startsWith('arn:')) caps[ios ? 'appium:bundleId' : 'appium:appPackage'] = app
         // Device Farm injects appium:app itself for an uploaded app.
+        // --attach: drive the app as it is (its screen, its login), without
+        // the relaunch Appium does by default, and leave it running after.
+        if (attach) Object.assign(caps, { 'appium:forceAppLaunch': false, 'appium:shouldTerminateApp': false, 'appium:noReset': true })
+        // An app's WebView shows up as a context only once its inspector
+        // connects; give it a moment (eval).
+        if (ios) caps['appium:webviewConnectTimeout'] = 10_000
         const web = !app && !!url
         if (web) caps.browserName = ios ? 'Safari' : 'Chrome'
 
@@ -438,13 +444,13 @@ export class JevDevice {
 
     // ---- actions (same shapes as JevBrowser) -----------------------------
 
-    async open(url, { session = 'default', pace: p, device, platform, app } = {}) {
+    async open(url, { session = 'default', pace: p, device, platform, app, attach } = {}) {
         const pc = pace.resolvePace(p || this.pace)
         this.touch()
         this.expired.delete(session)
         let s = this.sessions.get(session)
         if (s && (device || app)) { await this.release(session); s = null }
-        s ||= await this.start(session, { device, platform, app, url })
+        s ||= await this.start(session, { device, platform, app, url, attach })
         if (url) {
             if (!s.webContext) throw new Error('this device session is an app, not a browser; open it with a url and no --app')
             await s.wd.url(url)
@@ -525,6 +531,17 @@ export class JevDevice {
         else await this.native(s, () => this.pressNative(s, key))
         await this.settle(s, pc)
         return { pressed: key }
+    }
+
+    // Run a function body in the page: the browser tab, or the app's WebView.
+    async evaluate(script, { session } = {}) {
+        const s = this.session(session)
+        this.touch()
+        if (s.webContext) return { value: await s.wd.execute(script) }
+        const view = (await s.wd.contexts()).filter((c) => c !== 'NATIVE_APP').pop()
+        if (!view) throw new Error('no WebView in this app to evaluate in')
+        await s.wd.context(view)
+        try { return { value: await s.wd.execute(script) } } finally { await s.wd.context('NATIVE_APP') }
     }
 
     // Bring another installed app (Settings, Photos, ...) to the front.

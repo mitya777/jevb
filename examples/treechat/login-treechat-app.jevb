@@ -3,7 +3,7 @@
 # Never write credentials in a scenario; results show the ${...} placeholder.
 # Use a dedicated test account. Read-only once logged in: never posts or
 # upvalues.
-#   jevb run examples/login-treechat-app.jevb --device "pixel 9" --app treechat.apk
+#   jevb run examples/treechat/login-treechat-app.jevb --device "pixel 9" --app treechat.apk
 open
 act? dismiss the notifications permission prompt without allowing
 check is this a login page?

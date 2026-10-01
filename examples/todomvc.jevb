@@ -1,0 +1,19 @@
+# The 60-second tour: a public demo app, nothing to sign up for.
+# Its todos live in your browser's local storage only.
+#   jevb run examples/todomvc.jevb            # human pace: watch with JEVB_HEADED=1
+#   jevb run examples/todomvc.jevb --pace agent
+open https://demo.playwright.dev/todomvc/
+check is an empty todo list with a "What needs to be done?" box shown?
+type the new todo box => Buy oat milk
+press Enter
+type the new todo box => Call the plumber
+press Enter
+check are "Buy oat milk" and "Call the plumber" both listed, with "2 items left"?
+act mark "Buy oat milk" as done
+check does the counter say "1 item left"?
+act show only the completed todos
+check is "Buy oat milk" shown?
+refute is "Call the plumber" shown?
+act clear the completed todos
+act show all todos
+check is "Call the plumber" the only todo left?

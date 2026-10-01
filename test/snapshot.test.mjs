@@ -25,6 +25,7 @@ test('snapshot: one option per real control, named the way a person would', asyn
         'button "Follow"', // pointer wrapper around a button is not listed twice
         'input "Display name" type=text', // sibling-div label
         'input "Password" type=password',
+        'input "Subscribe to digest" type=checkbox', // opacity 0 under a styled label: still the control
         'button "Disabled button" disabled',
         'button "Inside panel"', // its tabindex=0 panel root is not an option
         'a "Far link" href=/far offscreen',

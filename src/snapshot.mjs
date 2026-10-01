@@ -71,7 +71,11 @@ export function collect() {
         const r = el.getBoundingClientRect()
         if (r.width < 2 || r.height < 2) continue
         const cs = getComputedStyle(el)
-        if (cs.visibility === 'hidden' || cs.display === 'none' || Number(cs.opacity) === 0) continue
+        if (cs.visibility === 'hidden' || cs.display === 'none') continue
+        // Custom-styled checkboxes and radios are real inputs at opacity 0
+        // under a painted label (TodoMVC, most UI kits); they're still what
+        // gets clicked. Anything else at opacity 0 is hidden.
+        if (Number(cs.opacity) === 0 && !el.matches('input[type=checkbox],input[type=radio],input[type=file],input[type=range]')) continue
         if (el.closest('[aria-hidden=true],[inert]')) continue
         // Skip wrappers whose only job is to contain an already-listed control.
         if (el.matches('[tabindex]') && !el.matches('a,button,input,textarea,select,[role],[contenteditable]')

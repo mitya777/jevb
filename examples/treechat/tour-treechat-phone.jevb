@@ -1,8 +1,8 @@
 # Tour on a phone (Safari/Chrome on a real device): tour-treechat.jevb with
 # the mobile layout, where the sidebar is a slide-out menu opened from an
 # unlabeled icon at the top left. Read-only: logged out, never posts.
-#   jevb run examples/tour-treechat-phone.jevb --device "iphone 14"
-#   jevb run examples/tour-treechat-phone.jevb --device "pixel 9"
+#   jevb run examples/treechat/tour-treechat-phone.jevb --device "iphone 14"
+#   jevb run examples/treechat/tour-treechat-phone.jevb --device "pixel 9"
 open https://treechat.com/
 check is a "Start Earning" button shown?
 refute is an error shown?

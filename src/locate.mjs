@@ -43,7 +43,7 @@ export async function locateControl(png, intent) {
         messages: [{
             role: 'user',
             content: [
-                { type: 'text', text: `This is the current phone screen (${w}x${h}). Tap the control a user should tap to: "${intent}". Use one click and no screenshot. If nothing on screen does that, reply "none" without clicking.` },
+                { type: 'text', text: `This is the current phone screen (${w}x${h}). Tap the control a user should tap to: "${intent}". First write the visible label (or icon) of the control you will tap, in a few words. Then use one click and no screenshot. A control whose label only looks or sounds alike does not count (a "New" button is not a "Now" tab). If nothing on screen does that, reply "none" without clicking.` },
                 { type: 'image', source: { type: 'base64', media_type: 'image/png', data: small.png } },
             ],
         }],
@@ -56,7 +56,10 @@ export async function locateControl(png, intent) {
         const said = res.content.map((b) => (b.type === 'text' ? b.text : b.type === 'tool_use' ? `[${b.name}]` : '')).join(' ').trim()
         return { none: true, said: said.slice(0, 160), ms, usage: res.usage }
     }
-    return { x: x * k, y: y * k, width: W, height: H, ms, usage: res.usage }
+    // What Sonnet says it is tapping, for the log: a wrong tap (the "New"
+    // post button for the "Now" tab, which opened the composer) shows at once.
+    const said = res.content.filter((b) => b.type === 'text').map((b) => b.text).join(' ').trim().slice(0, 80)
+    return { x: x * k, y: y * k, width: W, height: H, ms, usage: res.usage, said }
 }
 
 // Downscale a PNG by an integer factor (box average): no image library beyond

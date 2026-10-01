@@ -22,10 +22,10 @@ check is the home feed with posts shown?
 # The feed
 scroll 1500
 check are posts shown?
-scroll -1500
-act? switch the feed to Hot
+scroll top
+act? switch the feed's sort to Hot (the small Hot tab beside Now, under Public and Following)
 check are posts shown?
-act? switch the feed back to Now
+act? switch the feed's sort back to Now (the small Now tab beside Hot)
 act? switch to the Following tab
 act? switch back to the Public tab
 

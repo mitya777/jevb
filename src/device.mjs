@@ -327,8 +327,8 @@ export class JevDevice {
         const inside = (snap?.elements || []).filter((e) => e.rect && x >= e.rect.x && x <= e.rect.x + e.rect.w && y >= e.rect.y && y <= e.rect.y + e.rect.h
             && Math.hypot(e.x - x, e.y - y) <= near)
             .sort((p, q) => p.rect.w * p.rect.h - q.rect.w * q.rect.h)[0]
-        const el = inside || { id: 'visual', role: 'visual', label: intent, x, y, rect: { x: x - 10, y: y - 10, w: 20, h: 20 }, desc: `visual target for "${intent}" at ${x},${y}` }
-        this.log(`located "${intent}" on the screenshot at ${x},${y} in ${at.ms}ms${inside ? ` -> ${inside.desc}` : ' (not in the accessibility tree)'}`)
+        const el = inside || { id: 'visual', role: 'visual', label: intent, x, y, rect: { x: x - 10, y: y - 10, w: 20, h: 20 }, desc: `visual target${at.said ? ` "${at.said.replace(/"/g, "'")}"` : ''} for "${intent}" at ${x},${y}` }
+        this.log(`located "${intent}" on the screenshot at ${x},${y} in ${at.ms}ms${at.said ? ` ("${at.said}")` : ''}${inside ? ` -> ${inside.desc}` : ' (not in the accessibility tree)'}`)
         return { el, target: { id: el.id, confidence: 1, desc: el.desc, visual: true, model: process.env.JEVB_LOCATE_MODEL || 'claude-sonnet-5' } }
     }
 

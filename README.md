@@ -96,12 +96,12 @@ only reports.
 
 ```mermaid
 flowchart LR
-  A["jevb act mark 'Buy oat milk' as done"] --> S[Snapshot: every visible control<br/>gets an id + a one-line description]
-  S --> C{{"Jev choice<br/>(~200ms)"}}
-  C -->|"input 'Toggle Todo' in 'Buy oat milk'"| D[Click / tap at human or agent pace]
-  C -->|none or confidence < 0.5| N[NO_MATCH + top candidates]
-  D --> W[Wait for navigation, load and text to settle]
-  W --> K{{"Jev noul<br/>does the screen show …?"}}
+  A["jevb act mark 'Buy oat milk' as done"] --> S["Snapshot: each visible control<br/>gets an id and a one-line description"]
+  S --> C{{"Jev choice (~200ms)"}}
+  C -->|"input 'Toggle Todo' in 'Buy oat milk'"| D["Click or tap, at human or agent pace"]
+  C -->|"none, or confidence under 0.5"| N["NO_MATCH + top candidates"]
+  D --> W["Wait for navigation, load, and text to settle"]
+  W --> K{{"Jev noul: does the screen show …?"}}
 ```
 
 Each design choice below came from a measurement:

@@ -12,7 +12,7 @@ type the password field => ${TREECHAT_PASSWORD}
 press HideKeyboard
 act log in
 refute is an error or "wrong password" message shown?
-check is the user logged in?
+refute is the login page still shown?
 
 # The app reopens wherever this account last was (a Channels page, say):
 # start from the home feed.
@@ -31,12 +31,12 @@ act? switch back to the Public tab
 
 # Open a post and come back. Android's Back button on a post closes the
 # production app (to the phone's home screen), so go back in the app.
-act open the first post in the feed by tapping its text
+act open the first post in the feed by tapping the text under its author's name, or its card's author row if it has no text
 check is a single post or conversation thread shown?
 act go back to the feed with the back arrow at the top left
 check is the home feed shown?
 scroll 1200
-act open a post by tapping its text
+act open a post by tapping the text under its author's name, or its card's author row if it has no text
 check is a single post or conversation thread shown?
 scroll 800
 act go back to the feed with the back arrow at the top left

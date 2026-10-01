@@ -105,7 +105,7 @@ export class JevDevice {
     }
 
     // Provision a device and start an Appium session on it.
-    async start(name, { device, platform, app, url }) {
+    async start(name, { device, platform, app, url, attach = false }) {
         const local = process.env.JEVB_APPIUM_URL
         platform = platform?.toLowerCase() || (/iphone|ipad|ios/i.test(device || '') || /\.ipa$/.test(app || '') ? 'ios' : 'android')
         let remote = null
@@ -127,6 +127,12 @@ export class JevDevice {
         else if (app && local && fs.existsSync(app)) caps['appium:app'] = path.resolve(app)
         else if (app && !fs.existsSync(app) && !app.startsWith('arn:')) caps[ios ? 'appium:bundleId' : 'appium:appPackage'] = app
         // Device Farm injects appium:app itself for an uploaded app.
+        // --attach: drive the app as it is (its screen, its login), without
+        // the relaunch Appium does by default, and leave it running after.
+        if (attach) Object.assign(caps, { 'appium:forceAppLaunch': false, 'appium:shouldTerminateApp': false, 'appium:noReset': true })
+        // An app's WebView shows up as a context only once its inspector
+        // connects; give it a moment (eval).
+        if (ios) caps['appium:webviewConnectTimeout'] = 10_000
         const web = !app && !!url
         if (web) caps.browserName = ios ? 'Safari' : 'Chrome'
 
@@ -438,13 +444,13 @@ export class JevDevice {
 
     // ---- actions (same shapes as JevBrowser) -----------------------------
 
-    async open(url, { session = 'default', pace: p, device, platform, app } = {}) {
+    async open(url, { session = 'default', pace: p, device, platform, app, attach } = {}) {
         const pc = pace.resolvePace(p || this.pace)
         this.touch()
         this.expired.delete(session)
         let s = this.sessions.get(session)
         if (s && (device || app)) { await this.release(session); s = null }
-        s ||= await this.start(session, { device, platform, app, url })
+        s ||= await this.start(session, { device, platform, app, url, attach })
         if (url) {
             if (!s.webContext) throw new Error('this device session is an app, not a browser; open it with a url and no --app')
             await s.wd.url(url)
@@ -511,6 +517,8 @@ export class JevDevice {
     }
 
     // Enter, Back, Home, HideKeyboard (plus Tab/Escape/Backspace on Android).
+    // iOS also has Screenshot, and ScreenshotEditor (take one, then open its
+    // thumbnail in the markup editor, which shares the image itself).
     // iOS has no back button: Back is the left-edge swipe.
     async press(key, { session, pace: p } = {}) {
         const pc = pace.resolvePace(p || this.pace)
@@ -523,6 +531,26 @@ export class JevDevice {
         else await this.native(s, () => this.pressNative(s, key))
         await this.settle(s, pc)
         return { pressed: key }
+    }
+
+    // Run a function body in the page: the browser tab, or the app's WebView.
+    async evaluate(script, { session } = {}) {
+        const s = this.session(session)
+        this.touch()
+        if (s.webContext) return { value: await s.wd.execute(script) }
+        const view = (await s.wd.contexts()).filter((c) => c !== 'NATIVE_APP').pop()
+        if (!view) throw new Error('no WebView in this app to evaluate in')
+        await s.wd.context(view)
+        try { return { value: await s.wd.execute(script) } } finally { await s.wd.context('NATIVE_APP') }
+    }
+
+    // Bring another installed app (Settings, Photos, ...) to the front.
+    async launch(app, { session, pace: p } = {}) {
+        const s = this.session(session)
+        if (!app) throw new Error('launch needs a bundle id (iOS) or package (Android)')
+        await this.native(s, () => s.wd.execute('mobile: activateApp', [s.platform === 'ios' ? { bundleId: app } : { appId: app }]))
+        await this.settle(s, pace.resolvePace(p || this.pace))
+        return { launched: app }
     }
 
     async pressNative(s, key) {
@@ -542,6 +570,24 @@ export class JevDevice {
             await s.wd.execute('mobile: pressKey', [{ keycode }])
         } else if (key === 'Enter') {
             await s.wd.sendKeysTo(await s.wd.activeElement(), '\n')
+        } else if (key === 'Screenshot' || key === 'ScreenshotEditor') {
+            // The HID consumer "Snapshot" usage: iOS takes a screenshot, as
+            // from side + volume up.
+            await s.wd.execute('mobile: performIoHidEvent', [{ page: 0x0c, usage: 0x65, durationSeconds: 0.05 }])
+            if (key === 'ScreenshotEditor') {
+                // The thumbnail sits bottom-left for ~5s and is SpringBoard's,
+                // outside the app's tree, so tap where it lands. It can take
+                // 1-2s to slide in on a busy host; a second tap lands on the
+                // image inside the opened editor, which does nothing.
+                const { w, h } = s.screen
+                for (const wait of [1500, 1000]) {
+                    await sleep(wait)
+                    await s.wd.actions([{ type: 'pointer', id: 'finger', parameters: { pointerType: 'touch' }, actions: [
+                        { type: 'pointerMove', duration: 0, x: Math.round(w * 0.2), y: Math.round(h * 0.86) },
+                        { type: 'pointerDown', button: 0 }, { type: 'pause', duration: 80 }, { type: 'pointerUp', button: 0 },
+                    ] }])
+                }
+            }
         } else if (key === 'Home') {
             await s.wd.execute('mobile: pressButton', [{ name: 'home' }])
         } else if (key === 'Back') {

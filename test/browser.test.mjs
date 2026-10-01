@@ -78,3 +78,13 @@ for (const pace of ['agent', 'human']) {
         } finally { await b.shutdown() }
     })
 }
+
+test('eval runs a function body in the page and returns its value', async () => {
+    const b = new JevBrowser({ pace: 'agent' })
+    try {
+        await b.open(site.url('next.html'))
+        const { value } = await b.evaluate('return { title: document.title, w: innerWidth > 0 }')
+        assert.equal(value.w, true)
+        assert.equal(typeof value.title, 'string')
+    } finally { await b.shutdown() }
+})

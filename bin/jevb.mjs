@@ -17,14 +17,18 @@ const HERE = path.dirname(fileURLToPath(import.meta.url))
 const USAGE = `jevb <command> [args] [--pace human|agent] [--session NAME]
 
   open <url>                       navigate (starts daemon + chromium on demand)
-  open [url] --device NAME [--app FILE|URL|ARN|BUNDLE_ID] [--platform ios|android]
+  open [url] --device NAME [--app FILE|URL|ARN|BUNDLE_ID] [--platform ios|android] [--attach]
                                    real phone on AWS Device Farm (metered per
                                    minute): an app, or Safari/Chrome at <url>.
                                    Later commands on that --session drive it.
   devices [--platform ios|android] Device Farm phones you can open
   act <intent...>                  Jev picks the element, then click it
   type <intent...> -- <text...>    Jev picks the field, then type text [--enter]
-  press <key>                      e.g. Enter, Escape, Meta+K
+  press <key>                      e.g. Enter, Escape, Meta+K; on iOS also
+                                   Screenshot, ScreenshotEditor
+  launch <bundle id|package>       bring another app on the phone to the front
+  eval -- <js>                     run a function body in the page (an app's WebView
+                                   on a phone) and print what it returns
   scroll [dy|end|top]              default 600; end/top follow in-app scroll panels
   check <question...>              Jev noul over the page; exit 1 if < --threshold (0.7)
   refute <question...>             inverse check; exit 1 if >= --threshold (0.3)
@@ -59,7 +63,7 @@ function parseArgs(argv) {
         else if (a.startsWith('--')) {
             const k = a.slice(2)
             const next = argv[i + 1]
-            if (['enter', 'full', 'help', 'no-batch'].includes(k)) flags[k] = true
+            if (['enter', 'full', 'help', 'no-batch', 'attach'].includes(k)) flags[k] = true
             else if (k === 'check' || k === 'refute') { (flags[k] ||= []).push(next); i++ }
             else { flags[k] = next; i++ }
         } else pos.push(a)
@@ -111,11 +115,13 @@ async function main() {
     const text = pos.join(' ')
     const args = {
         status: {}, snap: common, close: common,
-        open: { ...common, url: pos[0], device: flags.device, app: flags.app, platform: flags.platform },
+        open: { ...common, url: pos[0], device: flags.device, app: flags.app, platform: flags.platform, attach: !!flags.attach },
+        eval: { ...common, script: (rest || pos).join(' ') },
         devices: { platform: flags.platform },
         act: { ...common, intent: text },
         type: { ...common, intent: text, text: (rest || []).join(' '), submit: !!flags.enter },
         press: { ...common, key: pos[0] },
+        launch: { ...common, app: pos[0] },
         scroll: { ...common, dy: pos[0] },
         check: { ...common, question: text, threshold: flags.threshold },
         refute: { ...common, question: text, threshold: flags.threshold, negate: true },

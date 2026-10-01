@@ -485,7 +485,17 @@ export class JevDevice {
         // Web fields and iOS append each element send. UiAutomator2 replaces
         // the whole value (and key events go through the IME, which
         // autocapitalizes), so native Android sets prefix + typed-so-far.
-        const field = el.web ? tapped : await s.wd.activeElement()
+        const field = el.web ? tapped : await s.wd.activeElement().catch(() => null)
+        // A stale tree (an Android WebView's) can hide the focused field from
+        // WebDriver: the tap (often a screenshot one) focused it, so type as
+        // key presses into whatever has focus. No read-back possible.
+        if (!field) {
+            await s.wd.actions([{ type: 'key', id: 'keyboard', actions: [...text].flatMap((c) => [{ type: 'keyDown', value: c }, { type: 'keyUp', value: c }]) }])
+            await s.wd.releaseActions()
+            if (submit) await this.press('Enter', { session, pace: pc })
+            else await this.settle(s, pc)
+            return { typed: target, chars: text.length, keys: true, checks: checkResults }
+        }
         const replaces = !el.web && s.platform === 'android'
         const prefix = replaces ? el.value || '' : ''
         // Password fields read back masked, and their text must never reach a

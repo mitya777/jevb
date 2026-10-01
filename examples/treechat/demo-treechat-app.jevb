@@ -3,8 +3,8 @@
 # never submits.
 # Needs a Treechat app build (not public); point --app at your own .apk/.ipa
 # and adjust the steps to your app.
-#   jevb run examples/demo-treechat-app.jevb --device "pixel 9" --app treechat.apk
-#   jevb run examples/demo-treechat-app.jevb --device "iphone 14" --app treechat.ipa
+#   jevb run examples/treechat/demo-treechat-app.jevb --device "pixel 9" --app treechat.apk
+#   jevb run examples/treechat/demo-treechat-app.jevb --device "iphone 14" --app treechat.ipa
 pace human
 open
 act? dismiss the notifications permission prompt without allowing

@@ -59,7 +59,7 @@ export async function labelControls(png, controls, { context = '' } = {}) {
 }
 
 // Last resort for a control the accessibility tree doesn't contain at all
-// (a clickable div with no role - Treechat's menu button in its Android app):
+// (a clickable div with no role, e.g. an app's menu button on Android):
 // ask Claude where to tap, with the computer-use toolset, whose click
 // coordinates are trained to be accurate. Plain "give me x,y" prompting was
 // off by 100px+ (2 of 4 hits for Haiku and Sonnet); Sonnet 5 with the

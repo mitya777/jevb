@@ -1,125 +1,239 @@
 # jevb
 
-Plain-English browser and phone tests for agents and CI. You write
-`act go to create a new account` and `check is a sign-up form shown?`, and
-[Jev](https://docs.typesafe.ai) (TypeSafe System One) picks the element and
-judges the page in ~150–300ms. It drives headless Chromium on demand, and
-real iPhones and Android phones through AWS Device Farm or a local Appium
-server. It runs at human pace by default, or as fast as possible.
-
-> Status: experimental. Plain Playwright with selectors is faster per step;
-> jevb trades speed for selector-free steps and plain-English checks.
-
-## What you need
-
-| | Required for | Where it goes |
-|---|---|---|
-| TypeSafe API key | everything | `TYPESAFEAI_API_KEY` |
-| AWS credentials with Device Farm access | real phones (optional, metered) | `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY`, or an AWS profile |
-
-Install the latest release (while the repo is private, `gh` must be logged
-in with access to it):
+**Browser and phone tests in plain English, built for coding agents and CI.**
 
 ```bash
-gh release download --repo mitya777/jevb --pattern 'jevb-*.tgz' --dir /tmp/jevb --clobber && npm install -g /tmp/jevb/jevb-*.tgz
-npx -y playwright-core install chromium-headless-shell
+jevb open https://demo.playwright.dev/todomvc/
+jevb type the new todo box --enter -- Buy oat milk
+jevb type the new todo box --enter -- Call the plumber
+jevb act mark "Buy oat milk" as done             # picks: input "Toggle Todo" in "Buy oat milk"
+jevb check does the counter say "1 item left"?    # pass → exit 0
 ```
 
-Then put the key(s) in the environment or in `.env` in the directory you run
-jevb from (see `.env.example`).
+No selectors and no screenshots sent to a large model. jevb drives a real
+browser (or a real iPhone or Android phone). A small, fast model,
+[Jev](https://docs.typesafe.ai), answers only the two questions that need
+understanding: *which element did you mean?* and *does the screen show this?*
+Each answer takes about 150–300ms. Code does everything else.
 
-`jevb update` installs the newest release and refreshes its Chromium.
-`jevb update --check` only reports, and `jevb version` prints the installed
-version. From a git clone, `update` tells you to `git pull && npm install`
-instead:
+MIT · Node 22+ · headless Chromium, your own Chrome, iOS and Android
+
+---
+
+## Why
+
+Coding agents now make most UI changes, and an agent needs to *see* that its
+change works. The usual options both fall short:
+
+- **An LLM driving a browser from screenshots** works, but every step is a
+  large-model round trip. On one 23-step tour of a real site, an agent
+  driving the browser itself took 55–58s and cost about $0.75–0.95 per run.
+  jevb ran the same tour in 18–26s for about $0.003 in Jev calls.
+- **Playwright with selectors** is fast, but the agent has to write and
+  maintain selectors for markup it didn't design. "Is the right thing on
+  screen?" becomes custom assertion code, and the selectors break on the
+  next redesign.
+
+jevb sits in between. Steps read the way a person would describe them
+(`act open the settings`, `check is a sign-up form shown?`), so they survive
+redesigns and anyone can review them. Each step costs one small-model call,
+not a frontier-model turn. When jevb isn't sure, it says so: a low-confidence
+pick returns `NO_MATCH` with the top candidates instead of guessing a click.
+
+Plain Playwright is still faster per step. Reach for jevb where
+selectors are the bottleneck: an agent checking its own work, smoke tests
+that outlive redesigns, and real phones.
+
+## Quick start
 
 ```bash
-git clone https://github.com/mitya777/jevb && cd jevb && npm install
-npx playwright-core install chromium-headless-shell
-cp .env.example .env     # fill in the key(s)
-node bin/jevb.mjs run examples/treechat-signup-nav.jevb   # or `npm link` for `jevb`
+npm install -g https://github.com/mitya777/jevb/releases/latest/download/jevb.tgz
+export TYPESAFEAI_API_KEY=...     # key: https://console.typesafe.ai/keys
+jevb setup                        # installs headless Chromium if needed, checks the key
 ```
 
-The `examples/` run read-only against the public site treechat.com (the
-project this was built to test). They never post, sign in or pay.
-
-- **On demand.** Nothing runs until the first action. The CLI starts a
-  localhost daemon if needed. The daemon launches Chromium on first use and
-  closes it after `JEVB_IDLE_MS` (default 2 min) with no actions, then exits
-  itself after `JEVB_DAEMON_IDLE_MS` (15 min). After an idle shutdown, acting on
-  the old session fails with `SESSION_EXPIRED`, so a check can't pass
-  against a blank page.
-- **Jev decides; code drives.** Every visible interactive element gets a
-  `data-jevb` id and a one-line description. `act`/`type` ask Jev a single
-  `choice` question (~150–300ms) to pick the element for a plain-English
-  intent. If the answer is `none` or confidence is below 0.5, you get
-  `NO_MATCH` plus the top candidates, not a guessed click. `check`/`refute`
-  are Jev `noul` questions over the visible page text, usable as test
-  assertions.
-- **Human speed by default, agent speed on request.**
-  - `human`: curved mouse travel, hover dwell, per-key typing with jitter,
-    and a reading pause after navigation. This exercises the hover, focus,
-    and debounce paths that real users hit, and makes recordings watchable.
-  - `agent` (`--pace agent`, `JEVB_PACE=agent`, or `pace agent` in a
-    scenario): as fast as possible. It uses direct clicks and `fill()`, and
-    waits only on the page (load + network idle, capped at 3s).
-
-## CLI (one JSON object per command; exit 1 on error or failed check)
+`jevb setup` prints JSON and exits 0 only when jevb can launch a browser and
+reach Jev. Each failing check comes with a `fix` field. Then try it:
 
 ```bash
-jevb open https://app.treechat.com/
-jevb act go to create a new account
-jevb type the email field -- someone@example.com
-jevb check is a sign-up form shown?
-jevb refute is an error page shown?
-jevb checks --check 'is this a login page?' --refute 'is an error shown?'   # 1 Jev request
-jevb act open the composer --check 'is the feed loaded?'   # checks run in parallel with the pick
-jevb scroll end          # or top / 800 / -800; follows in-app scroll panels
-jevb snap                 # what Jev chooses from
-jevb shot out.png --full
+jevb open https://demo.playwright.dev/todomvc/
+jevb type the new todo box --enter -- Buy oat milk
+jevb type the new todo box --enter -- Call the plumber
+jevb act mark "Buy oat milk" as done
+jevb check does the counter say "1 item left"?
 jevb stop
 ```
 
-Use `--session NAME` for parallel contexts and `JEVB_HEADED=1` to watch.
+Every command prints one JSON object. The exit code is 1 on an error or a
+failed check. Add `JEVB_HEADED=1` to watch, or `--pace agent` to go as fast
+as the page allows.
 
-To test signed-in flows, attach to real Chrome instead of launching Chromium:
-`bin/jevb-chrome.sh` starts Google Chrome with a dedicated profile
-(`~/.jevb/chrome-profile`) and a local DevTools port, then prints
-`JEVB_CDP_URL`. Sign in there once (`JEVB_CHROME_PROFILE_DIR` pins which
-Chrome profile it starts in, if you add more than one); its cookies and Password Manager persist.
-With `JEVB_CDP_URL` set, sessions are tabs in that profile (no per-session
-isolation or `JEVB_VIDEO`), and idle/stop closes jevb's tabs but leaves
-Chrome running.
-`JEVB_DEMO=1` draws a visible cursor plus a HUD (step, and what Jev picked
-with its confidence). `JEVB_VIDEO=<dir>` records a .webm per session.
+## Hand it to your coding agent
 
-## Real phones (AWS Device Farm)
+**Installing.** Point your agent at this README, or paste:
 
-The same commands drive a real iPhone or Android phone. Jev picks from the
-device's accessibility tree (UiAutomator2 / XCUITest), `check` judges the text
-on screen, and taps, swipes and typing are touch gestures at human or agent
-pace. Mobile web runs in Safari/Chrome on the device, and snapshots use the
-native tree there too, so system alerts, keyboards and permission sheets are
-visible and tappable.
+> Install jevb: `npm install -g https://github.com/mitya777/jevb/releases/latest/download/jevb.tgz`,
+> then run `jevb setup` and fix whatever its JSON reports. The only thing you
+> may need from me is a TypeSafe API key (TYPESAFEAI_API_KEY).
 
-```bash
-jevb devices --platform android                       # what you can open
-jevb open https://app.treechat.com --device "pixel 8"  # Chrome on a real Pixel
-jevb open --device "iphone 15" --app build/Treechat.ipa  # uploads, installs, launches
-jevb act open the new thread composer                  # same session, now a phone
-jevb press Back                                        # Android key; iOS edge swipe
-jevb close                                             # stops the metered session
+**Using.** Add this to your `AGENTS.md` or `CLAUDE.md`:
+
+```markdown
+## Checking UI changes with jevb
+After changing UI, verify it in a real browser with jevb (one JSON object per
+command; exit 1 = error or failed check):
+- `jevb open <url>` · `jevb act <what to click>` · `jevb type <which field> -- <text>`
+- `jevb check <question about what's on screen>` · `jevb refute <question>`
+- `jevb snap` lists what jevb can click. Read it after a NO_MATCH, then rephrase.
+- Name visible text in checks: `check is a "Saved" toast shown?`, not `check did it work?`.
+- Use `--pace agent` for speed. Run `jevb stop` when done.
 ```
 
-Devices come from a **metered** (pay-per-minute) remote access session. The phone is
-billed from allocation until the session stops. jevb stops it on `close`,
-`stop`, daemon exit, errors during startup, and after `JEVB_DEVICE_IDLE_MS`
-(default 3 min) with no commands. Getting a device usually takes a minute or
-more.
+`jevb update` installs the newest release later, and `jevb update --check`
+only reports.
 
-Setup: any AWS credentials with Device Farm access (in `.env`, or the
-standard AWS chain). The narrowest option is a Device-Farm-only IAM key in an
-AWS profile named `jevb`, which jevb picks up automatically:
+## How it works
+
+```mermaid
+flowchart LR
+  A["jevb act mark 'Buy oat milk' as done"] --> S[Snapshot: every visible control<br/>gets an id + a one-line description]
+  S --> C{{"Jev choice<br/>(~200ms)"}}
+  C -->|"input 'Toggle Todo' in 'Buy oat milk'"| D[Click / tap at human or agent pace]
+  C -->|none or confidence < 0.5| N[NO_MATCH + top candidates]
+  D --> W[Wait for navigation, load and text to settle]
+  W --> K{{"Jev noul<br/>does the screen show …?"}}
+```
+
+Each design choice below came from a measurement:
+
+- **The pick never sees page text.** Jev chooses from short control
+  descriptions plus the URL and title. Adding the page text dropped pick
+  confidence from 0.94 to about 0.5 on a real sign-up page.
+- **Checks see only what's on screen.** Checks get the viewport's text, or
+  only the dialog's text while a dialog is open, plus form values with
+  passwords masked. With whole-page text, "is a thread shown?" passed at 0.92
+  *behind* a sign-up popup.
+- **Repeated controls carry their item.** Several "Reply" or "Edit" buttons
+  each read as `button "Edit" in "Grace Hopper grace@…"`. This works for
+  tables, cards, nested comments and title/action rows like Hacker News, on
+  web pages and in native app screens.
+- **First/last is code's job.** "Edit the last row" sends the copies to Jev
+  as one option (`button "Edit" ×3, one per item`). Jev judges the kind of
+  control, and jevb picks the bottommost on screen.
+- **Real controls, not just tags.** Clickable `<div>`s with a pointer cursor
+  (the usual React pattern) count. So do custom checkboxes hidden at opacity
+  0 under a styled label. Anything covered by a popup doesn't.
+- **Checks ride along.** Consecutive checks share one Jev request, sent in
+  parallel with the next step's pick. Checks always judge the screen
+  *before* the action.
+- **On demand.** The first command starts a local daemon. Chromium launches on
+  first use and closes after 2 minutes idle. A session that expired fails
+  with `SESSION_EXPIRED`, so a check can't pass against a blank page.
+- **Two paces.** `human` (the default) moves the mouse along curves, dwells
+  on hover, types key by key and pauses to read. This catches hover, focus
+  and debounce bugs, and makes recordings watchable. `agent` uses direct
+  clicks and `fill()`, and waits only on the page.
+
+## Scenarios
+
+A `.jevb` file has one step per line. The runner stops at the first step
+that throws, and exits non-zero if any check fails.
+
+```
+pace agent
+open /login
+act go to create a new account
+check is a sign-up form with "Username" and "Email" fields shown?
+type the email field => ${TEST_EMAIL}
+check@0.9 is the "Join" button enabled?
+refute is an error or "not found" page shown?
+act? dismiss the cookie banner
+shot out/signup.png
+```
+
+```bash
+jevb run examples/todomvc.jevb
+jevb run smoke.jevb --base http://localhost:5173 --pace agent
+```
+
+| Step | Does |
+|---|---|
+| `open <url>` | navigate (relative to `--base`) |
+| `act <intent>` | Jev picks a control, jevb clicks it |
+| `act? <intent>` | same, but no match is skipped, not failed |
+| `type <field> => <text>` | pick a field and type; `${NAME}` comes from env or `./.env` and is never echoed |
+| `press <key>` | `Enter`, `Escape`, `Meta+K`; on phones `Back`, `HideKeyboard` |
+| `scroll [px\|end\|top]` | follows in-app scroll panels |
+| `check <question>` | pass if Jev's noul ≥ 0.7 (`check@0.9` sets the bar) |
+| `refute <question>` | pass if noul < 0.3 |
+| `wait <ms>` · `shot <file>` · `pace human\|agent` | |
+| `device <name>` · `app <file\|id>` | the next `open` starts a phone |
+
+Write checks about text that's visible. Jev reads text, not pixels: "is a
+feed shown?" scores about 0.6, while "is a Public stream with Now, Hot and
+Top tabs shown?" scores about 0.8.
+
+## CLI
+
+| Command | |
+|---|---|
+| `open <url>` | navigate; starts the daemon and browser on demand |
+| `act <intent>` | pick and click; `--check Q` / `--refute Q` ride along |
+| `type <intent> -- <text>` | pick a field and type; `--enter` submits |
+| `check` / `refute <question>` | assert; `--threshold` |
+| `checks --check Q --refute Q …` | many checks in one Jev request |
+| `press <key>` · `scroll [dy\|end\|top]` | |
+| `snap` | the controls Jev chooses from |
+| `shot <path> [--full]` | screenshot |
+| `eval -- <js>` | run a function body in the page and print its result |
+| `run <file.jevb>` | run a scenario in-process (`--base`, `--pace`, `--no-batch`) |
+| `close` · `stop` · `status` | end a session · stop everything · show state |
+| `setup` · `update [--check]` · `version` | |
+
+All commands take `--session NAME` for parallel isolated sessions and
+`--pace human|agent`. From code: `import { JevBrowser, JevDevice, runScenario } from 'jevb'`.
+
+## Signed-in flows
+
+Attach to a real Google Chrome that has its own persistent profile, instead
+of a throwaway Chromium:
+
+```bash
+bin/jevb-chrome.sh           # starts Chrome with ~/.jevb/chrome-profile and prints JEVB_CDP_URL
+export JEVB_CDP_URL=http://127.0.0.1:9333
+```
+
+Sign in once in that window. jevb sessions then open as tabs in that profile,
+with its cookies and saved passwords. `stop` closes only jevb's tabs.
+
+## Real phones
+
+The same commands drive a real iPhone or Android phone. jevb reads the
+device's accessibility tree, and taps, swipes and typing are touch gestures.
+
+```bash
+jevb devices --platform ios
+jevb open https://example.com --device "iphone 15"        # Safari on a real iPhone
+jevb open --device "pixel 9" --app build/app.apk            # install and launch an app
+jevb act open the settings
+jevb close                                                  # stops the billed session
+```
+
+- **AWS Device Farm** (pay per device minute, us-west-2): any AWS
+  credentials with `AWSDeviceFarmFullAccess`. jevb picks up an AWS profile
+  named `jevb` automatically. A phone takes about a minute to start. jevb
+  stops it on `close`, on `stop`, on errors, and after 3 idle minutes.
+- **Local Appium** (free): set `JEVB_APPIUM_URL=http://127.0.0.1:4723` for a
+  simulator, an emulator or a USB phone.
+- **Unlabeled controls** (icon buttons with no accessible name): with
+  `ANTHROPIC_API_KEY` set, Claude Haiku names them from one screenshot. As a
+  last resort, Claude's computer use locates the control on screen. An
+  accessible name in your app is still the real fix.
+
+<details>
+<summary>Device Farm setup and phone details</summary>
+
+A Device-Farm-only IAM key in a profile named `jevb`:
 
 ```bash
 aws iam create-user --user-name jevb
@@ -127,192 +241,88 @@ aws iam attach-user-policy --user-name jevb --policy-arn arn:aws:iam::aws:policy
 aws iam create-access-key --user-name jevb --query 'AccessKey.[AccessKeyId,SecretAccessKey]' --output text | read id secret && aws configure set aws_access_key_id "$id" --profile jevb && aws configure set aws_secret_access_key "$secret" --profile jevb && aws configure set region us-west-2 --profile jevb
 ```
 
-(`JEVB_AWS_PROFILE` picks a different profile. Without one, the standard chain applies:
-`AWS_PROFILE`, env keys, or `aws login`.) The
-project is `JEVB_DF_PROJECT_ARN`, or a project named `jevb` that is created on first use.
-Device Farm is us-west-2 only. `--app` takes a local `.apk`/`.ipa` (uploaded),
-an https/s3 URL, an upload ARN, or an installed bundle id / package name. An
-iOS app must be a device build (`.ipa`), not a simulator build.
+- `--app` takes a local `.apk`/`.ipa` (uploaded), an https/s3 URL, an upload
+  ARN, or an installed bundle id. iOS needs a device build (`.ipa`), not a
+  simulator build.
+- iOS system alerts (permission prompts) aren't in the app's tree on Device
+  Farm, so jevb reads them through the alert API. While an alert is up, it's
+  the only thing on screen.
+- `press HideKeyboard` closes the keyboard. On Android, `press Back` closes the
+  keyboard first, like the real button. On iOS, Back is an edge swipe.
+- Unlabeled web inputs (a WebView sign-up form) take the text just above them
+  as their label. On Android, jevb sets field values directly, so the
+  keyboard can't autocapitalize them.
+- Device Farm records every session. The MP4 is under the session's artifacts
+  once it finishes stopping.
+- Pick a different profile with `JEVB_AWS_PROFILE`, or a project with
+  `JEVB_DF_PROJECT_ARN`. By default jevb uses a project named `jevb`, created
+  on first use.
 
-Unlabeled controls in apps: when Jev finds no confident match and the screen
-has controls with no accessible name (a menu button that reads as a bare
-"Button"), jevb sends one screenshot to Claude Haiku. Haiku names those
-controls ("Open navigation menu"), and Jev is asked again. It runs only when
-`ANTHROPIC_API_KEY` is set (env or `./.env`), costs about 2-3k tokens per screen
-that needs it, and caches labels by layout. Haiku sees the whole screen, so it
-can infer what a control does. An icon captioner (OmniParser) that only sees
-the icon could not: it called the same logo "a tree or plant growth
-indicator". The durable fix is still an accessible name in the app.
+</details>
 
-Controls missing from the tree entirely (a clickable div with no role, which
-Android doesn't expose) can't be named, so as a last resort jevb asks Claude
-Sonnet 5 with the computer-use toolset where on the screenshot to tap, and
-taps there (target `visual`). It runs only when the tree and Haiku found
-nothing. It costs about 6k tokens (~1-2 cents) and takes 1.5-4s. Its trained click
-coordinates hit 4 of 5 test targets, including Treechat's unlabeled menu
-button. Asking a model for "x,y" in plain text was off by 100px or more.
-Haiku 4.5 has no computer use. Set `JEVB_LOCATE_MODEL` to use another model.
+## Configuration
 
-In scenarios:
+Put these in the environment, or in `.env` in the directory you run jevb
+from (see [.env.example](.env.example)). Shell variables win.
 
-```
-device pixel 8
-app build/treechat.apk
-open                     # launch the app; or `open https://...` for mobile web
-act open the new thread composer
-```
+| Variable | |
+|---|---|
+| `TYPESAFEAI_API_KEY` | **required**, from [console.typesafe.ai/keys](https://console.typesafe.ai/keys) |
+| `JEVB_PACE` | `human` (default) or `agent` |
+| `JEVB_HEADED=1` · `JEVB_DEMO=1` · `JEVB_VIDEO=<dir>` | show the window · draw a cursor and a HUD of Jev's picks · record a `.webm` per session |
+| `JEVB_IDLE_MS` · `JEVB_DAEMON_IDLE_MS` · `JEVB_PORT` | browser idle close (2 min) · daemon exit (15 min) · daemon port (7788) |
+| `JEVB_CDP_URL` | attach to a running Chrome |
+| `AWS_*` · `JEVB_AWS_PROFILE` · `JEVB_DF_PROJECT_ARN` · `JEVB_DEVICE_IDLE_MS` | Device Farm |
+| `JEVB_APPIUM_URL` · `JEVB_APPIUM_UDID` | local Appium |
+| `ANTHROPIC_API_KEY` · `JEVB_LABEL_MODEL` · `JEVB_LOCATE_MODEL` | naming unlabeled native controls |
+| `JEV_MODEL` | Jev model (default `jev-latest`) |
 
-Or keep the scenario device-free and choose the phone per run:
-`jevb run examples/demo-treechat-app.jevb --device "iphone 14" --app treechat.ipa`.
+## Cost and speed
 
-Things specific to phones:
-- iOS system alerts, such as permission prompts, aren't in the app's tree on Device Farm.
-  jevb reads them through the alert API. While one is up, it is the only thing on screen,
-  and its buttons can be tapped (`act? dismiss the notifications prompt`).
-  `act?` skips instead of failing when nothing matches.
-- `press HideKeyboard` closes the keyboard (on iOS web views, it taps the ✓ Done
-  toolbar button). `press Back` on Android closes the keyboard first when one is
-  up, like the real button. iOS Back is an edge swipe, which many apps ignore.
-- Unlabeled web inputs, such as a WebView sign-up form, take the text just above them
-  as their label. Values are exact: Android sets the field value rather than sending
-  keys through the IME, which would autocapitalize.
-- A failed check lists the form `fields` Jev judged.
-- Device Farm records every session. The MP4 is under the session's artifacts once it
-  finishes stopping (`aws devicefarm list-artifacts --arn <session> --type FILE`).
+Measured in September 2026 against a production web app:
 
-`JEVB_APPIUM_URL=http://127.0.0.1:4723` (plus `JEVB_APPIUM_UDID`) uses a local
-Appium server instead: a simulator, an emulator or a USB phone, at no cost.
+| | |
+|---|---|
+| Jev call | 140–310ms |
+| Chromium cold start | 220–400ms |
+| [`examples/todomvc.jevb`](examples/todomvc.jevb), 6 checks and 8 actions | ~8s at agent pace, ~14s at human pace, 11 Jev calls |
+| A 23-step tour of a production site | 17–18s agent, ~48s human |
+| The same tour, an LLM agent driving the browser itself | 55–58s and ~$0.75–0.95 per run, vs ~$0.003 in Jev calls |
+| Real phone on Device Farm | ~60–70s to the first command, then 0.5–1.5s per step |
 
-## Testing jevb itself
+## Status
 
-```bash
-npm test            # offline, ~25s: real headless Chromium + a fake Jev, no key, no cost
-npm run test:live   # the same fixture pages judged by the real Jev (needs TYPESAFEAI_API_KEY)
-```
+Experimental and in active use. Things to know:
 
-`test/harness` starts two local servers. One serves the fixture pages in
-`test/fixtures`, whose cases include modals, pointer-div rows, icon-only
-buttons, covered and offscreen controls, and delayed renders and navigations.
-The other is a fake Jev that answers deterministically and records every
-request, so tests can assert what jevb sent: the pick request carries no page
-text, checks see no offscreen text, and passwords are masked.
+- **Jev is a hosted service.** jevb needs a TypeSafe account and sends each
+  pick's control list and each check's screen text to it. Don't point jevb
+  at screens with data you can't send to a third party.
+- **Jev reads text, not pixels.** Canvas apps, charts and image-only buttons
+  need accessible names, or the Claude fallback on phones.
+- **Known weak spot:** with no matching control, Jev can map a nearby verb to
+  an existing one (it treated "flag" as "hide"). The live suite tracks this.
 
-With the fake, a `"quoted label"` in an intent pins the pick. For example,
-`act click the last "Reply" button` picks a button labelled Reply. For checks,
-every quoted phrase in the question must be on screen. `jev.answer(fn)`
-overrides any single answer.
-
-`test:live` prints each case's confidence (noul) next to its threshold, so a
-drift in `jev-latest` shows up before a case flips. Known weak spots run as
-TODO and don't fail the suite.
-
-`test/fixtures/layouts.html` covers the common ways a page repeats one control
-per item: table rows, title and actions in sibling rows (Hacker News), an
-action in a header followed by the body, card grids, nested comment threads and
-lists. `test:live` also runs a Hacker News case, so the suite isn't measured
-only on the app jevb was first built for.
-
-### How repeated controls are picked
-
-When several controls share a label ("Reply", "Edit", "hide"), each option
-names the item it belongs to: `button "Edit" in "Grace Hopper grace@…"`.
-The same rule runs on native app screens, over the accessibility tree.
-Intents that say first/last ("edit the last row") send the copies to Jev as
-**one** option, `button "Edit" ×3, one per item, from "Ada…" to "Grace…"`. Jev
-judges which *kind* of control the intent means, and jevb picks the
-topmost/bottommost copy on screen.
-
-## Scenarios (for tests)
-
-```
-pace agent
-open /login
-act go to create a new account
-check is a sign-up form shown?
-check@0.9 is the Join button highlighted?    # custom threshold
-refute is an error or "not found" page shown?
-shot out/signup.png
-```
+## Developing
 
 ```bash
-jevb run examples/treechat-signup-nav.jevb
-jevb run my.jevb --base http://localhost:5174 --pace human
+git clone https://github.com/mitya777/jevb && cd jevb && npm install
+npx playwright-core install chromium-headless-shell
+npm test            # offline, ~30s: real Chromium + a fake Jev; no key, no cost
+npm run test:live   # the same fixtures judged by the real Jev, with confidence margins
 ```
 
-The runner stops at the first step that throws. It exits non-zero if any
-check fails.
+`test/harness` serves fixture pages (modals, pointer-div rows, icon buttons,
+covered and offscreen controls, six layouts of repeated controls) and runs a
+deterministic fake Jev that records every request. Tests can therefore
+assert exactly what jevb sends. `test:live` prints each case's confidence
+next to its threshold, so model drift shows up before a case flips.
 
-### Secrets
+`examples/treechat/` has the scenarios jevb was first built against (web and
+native app), kept as larger real-world examples.
 
-`${NAME}` in a `type` step is filled from the environment, or from `./.env`,
-when the step runs. Credentials therefore live in secrets (`.env`, CI secrets)
-and never in scenario files. Output and videos show the step as written, and
-password fields are masked in what Jev judges. A non-password field's value,
-such as an email, is part of the state that checks send to Jev.
-
-```
-type the email field => ${TREECHAT_EMAIL}
-type the password field => ${TREECHAT_PASSWORD}
-```
-
-An explicit `--pace` overrides `pace` lines in the scenario.
-
-### Batching
-
-Consecutive `check`/`refute` steps go to Jev as **one request**, since they
-share the same page state. If the next step is `act`/`type`, the batch is sent
-**at the same time** as that step's element-choice request, so it costs one
-round trip, not two. Checks always see the page *before* the action.
-
-The element choice never shares a request with the page text. Measured on
-Treechat signup, the page text in the state dropped the pick's confidence
-from 0.94 to about 0.5 for the same intent. `--no-batch` runs every step on its own
-for comparison. Batched and standalone nouls matched within 0.01 on the demo.
-
-Checks judge **what the user sees now**:
-- `viewport_text`: the text on screen. When a popup is open (`modal_open`),
-  it's only the popup's text.
-- `fields`: form values, which `innerText` leaves out. Passwords show only as
-  `(filled)`/`(empty)`.
-
-There's no whole-page text. Offscreen or covered text made judgments worse
-(footer-visible dropped from 0.75 to 0.58), and it let "is a thread shown?"
-pass at 0.92 behind a sign-up popup. Jev reads text, not layout, so name
-what's on screen: "is a feed shown?" scores ~0.6, "does the page show a Public
-stream with Now, Hot and Top tabs?" ~0.8.
-
-Element picks skip anything covered at its center (for example by a popup).
-They also include plain `<div>`s with a pointer cursor, which is how React
-apps usually build clickable rows and pills.
-
-`act` waits for navigations that start shortly after the click (e.g. after
-an analytics call). It then waits for the new page to commit, load, and for
-its text to stop changing, so checks never judge a blank page.
-
-Library use: `import { JevBrowser, JevDevice, runScenario } from 'jevb'`.
-
-## Cost / speed (measured 2026-09-26, against treechat.com)
-
-- `examples/tour-treechat.jevb`: landing → scroll end/top → Explore →
-  Hot/Now → Reply (sign-up popup) → close → Channels → Home. 16 checks and
-  7 actions, 0 failures; 17–18s at agent pace, ~48s at human pace.
-- `examples/demo-treechat.jevb` (10 checks, 3 actions, agent pace):
-  batched 2.2–3.1s with 7 Jev requests; `--no-batch` 4.0–4.2s with 13.
-
-- Fixture flow (type, click, 2 checks): ~2.5s at agent pace, ~6s at human pace.
-- Jev calls: 140–310ms each.
-- Chromium cold start: 220–400ms.
-
-## Releasing
-
-```bash
-npm version patch   # or minor / major: runs npm test, bumps, commits, tags vX.Y.Z
-git push --follow-tags
-```
-
-The tag starts `.github/workflows/release.yml`. It re-runs the tests on the
-tagged commit, runs `npm pack`, and publishes a GitHub Release with
-`jevb-X.Y.Z.tgz` attached. That's what `jevb update` installs.
+**Releasing:** run `npm version patch|minor|major && git push --follow-tags`.
+The tag runs the tests and publishes a GitHub Release with the packed
+tarball, which `jevb update` installs.
 
 ## License
 

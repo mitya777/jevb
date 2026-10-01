@@ -22,7 +22,10 @@ jobs:
       - run: npx playwright-core install --with-deps chromium-headless-shell
       - run: npm test
       - run: npm pack
+      # Also attach a fixed-name copy, so one URL always installs the latest:
+      # npm i -g https://github.com/<owner>/jevb/releases/latest/download/jevb.tgz
+      - run: cp jevb-*.tgz jevb.tgz
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" jevb-*.tgz --title "$GITHUB_REF_NAME" --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" jevb-*.tgz jevb.tgz --title "$GITHUB_REF_NAME" --generate-notes

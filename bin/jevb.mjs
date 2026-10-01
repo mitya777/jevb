@@ -39,6 +39,7 @@ const USAGE = `jevb <command> [args] [--pace human|agent] [--session NAME]
   pace [human|agent]               get/set the daemon default pace
   close                            close session (last one closes chromium)
   status | stop | serve
+  setup                            install the browser if missing, verify the Jev key; JSON, exit 1 if not ready
   update [--check]                 install the latest GitHub release (--check: only report)
   version
   run <scenario.jevb> [--base URL] [--device NAME --app FILE]
@@ -100,6 +101,12 @@ async function main() {
     if (!cmd || flags.help || cmd === 'help') return console.log(USAGE)
 
     if (cmd === 'version' || cmd === '--version' || cmd === '-v') return console.log((await import('../src/update.mjs')).version())
+    if (cmd === 'setup') {
+        const res = await (await import('../src/setup.mjs')).setup()
+        print(res)
+        process.exitCode = res.ok ? 0 : 1
+        return
+    }
     if (cmd === 'update') {
         // --check is also the batched-check flag elsewhere; here it takes no value.
         const check = argv.includes('--check')

@@ -174,9 +174,13 @@ export async function pageState(page, { maxText = 6000 } = {}) {
     return page.evaluate(readState, maxText)
 }
 
-// In-page half of pageState (self-contained, like collect).
-export function readState(maxText) {
+// In-page half of pageState (self-contained, like collect). The argument is
+// maxText, or { maxText, blocks }: blocks also returns the on-screen text
+// grouped by its nearest block element, each with the item it sits in, for
+// `jevb read <question>` to choose from.
+export function readState(arg) {
     {
+        const { maxText = 6000, blocks: wantBlocks = false } = typeof arg === 'object' && arg ? arg : { maxText: arg }
         const clean = (t) => t.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim()
         const vw = innerWidth, vh = innerHeight
         const shown = (el) => {
@@ -204,6 +208,7 @@ export function readState(maxText) {
         // body can be briefly null while Safari swaps documents (seen on an iOS 18 simulator)
         const root = modal || document.body || document.documentElement
         let viewport = ''
+        const byBlock = new Map()
         const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
         const range = document.createRange()
         for (let t = walker.nextNode(); t && viewport.length < maxText; t = walker.nextNode()) {
@@ -214,6 +219,40 @@ export function readState(maxText) {
             const cs = t.parentElement && getComputedStyle(t.parentElement)
             if (cs && (cs.visibility === 'hidden' || Number(cs.opacity) === 0)) continue
             viewport += t.textContent.trim() + (getComputedStyle(t.parentElement).display === 'inline' ? ' ' : '\n')
+            if (wantBlocks) {
+                let b = t.parentElement
+                while (b && b !== root && ['inline', 'contents'].includes(getComputedStyle(b).display)) b = b.parentElement
+                if (!byBlock.has(b)) byBlock.set(b, [])
+                byBlock.get(b).push(t.textContent)
+            }
+        }
+        const flat = (x) => x.replace(/\s+/g, ' ').trim()
+        const blocks = []
+        for (const [el, parts] of byBlock) {
+            const text = flat(parts.join(' ')).slice(0, 300)
+            if (!text) continue
+            // The item it sits in: the text just around it in the nearest
+            // element with more text ("$40" -> "Red kettle … Add to cart").
+            // A window, not the whole element: that element may hold every
+            // item (a list, Hacker News title and points rows as siblings).
+            let context = ''
+            for (let a = el, d = 0; a && d < 6 && (a === root || root.contains(a)); a = a.parentElement, d++) {
+                const around = flat(a.innerText || '')
+                const at = around.indexOf(text)
+                if (at < 0 || around.length <= text.length + 3) continue
+                const end = at + text.length
+                // Cut at word boundaries, but only where the window cut a word.
+                const before = (at > 50 ? around.slice(at - 50, at).replace(/^\S*\s/, '') : around.slice(0, at)).trim()
+                const after = (around.length > end + 25 ? around.slice(end, end + 25).replace(/\s\S*$/, '') : around.slice(end)).trim()
+                context = [before, after].filter(Boolean).join(' … ')
+                break
+            }
+            // What kind of text it is, so "what's the heading?" or "what does
+            // the button say?" can be answered: the role, else the tag.
+            const tag = el.tagName.toLowerCase(), role = el.getAttribute('role')
+            const kind = role || (/^h[1-6]$/.test(tag) ? 'heading' : { button: 'button', a: 'link', td: 'cell', th: 'header cell', li: 'item', label: 'label', caption: 'caption', summary: 'summary', legend: 'legend', title: 'title' }[tag] || 'text')
+            const r = el.getBoundingClientRect()
+            if (!blocks.some((x) => x.text === text && x.context === context)) blocks.push({ kind, text, context, at: [Math.round(r.left), Math.round(r.top)] })
         }
         const fields = []
         for (const el of root.querySelectorAll('input:not([type=hidden]),textarea,select,[contenteditable=""],[contenteditable=true]')) {
@@ -230,6 +269,7 @@ export function readState(maxText) {
             modal_open: !!modal,
             viewport_text: clean(viewport).slice(0, maxText),
             fields,
+            ...(wantBlocks && { blocks }),
         }
     }
 }

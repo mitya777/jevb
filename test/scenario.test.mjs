@@ -100,6 +100,12 @@ test('a missing ${NAME} fails before anything opens', async () => {
     assert.equal(jev.requests.length, 0)
 })
 
+test('read step: the answer lands in the results', async () => {
+    const r = await run('open flow.html\nread which post says "Third post"?')
+    assert.equal(r.failed, 0, JSON.stringify(r.results))
+    assert.equal(r.results.at(-1).answer, 'Third post')
+})
+
 test('unknown step names the step', async () => {
     const r = await run('open flow.html\nclikc the thing')
     assert.match(r.results.at(-1).error, /unknown step "clikc"/)

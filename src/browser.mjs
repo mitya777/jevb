@@ -3,10 +3,10 @@
 // (fresh) on the next one. Sessions are named browser contexts.
 import { chromium } from 'playwright-core'
 import { OVERLAY } from './demo.mjs'
-import { judge } from './judge.mjs'
+import { judge, pickText } from './judge.mjs'
 import * as pace from './pace.mjs'
 import { ACTIONS, trackBusy } from './idle.mjs'
-import { pageState, shortlist, snapshot } from './snapshot.mjs'
+import { pageState, readState, shortlist, snapshot } from './snapshot.mjs'
 
 const DEFAULT_IDLE_MS = Number(process.env.JEVB_IDLE_MS || 120_000)
 // Attach to an already-running Chrome (see bin/jevb-chrome.sh) instead of
@@ -213,6 +213,25 @@ export class JevBrowser {
 
     async check(question, { session, threshold, negate = false } = {}) {
         return (await this.checks([{ question, threshold, negate }], { session }))[0]
+    }
+
+    // `jevb read`: no question = what checks see (no Jev call); --full = the
+    // whole document's text; a question = the on-screen block that answers
+    // it, verbatim (one Jev choice, see pickText).
+    async readText({ session, question, full = false } = {}) {
+        const page = await this.page(session)
+        if (full) return { url: page.url(), title: await page.title(), text: (await page.evaluate(() => document.body?.innerText || '')).slice(0, 50_000) }
+        if (!question) return pageState(page)
+        const state = await page.evaluate(readState, { maxText: 20_000, blocks: true })
+        const count = (u) => { this.jevRequests++; this.jevTokens.input += u.input; this.jevTokens.output += u.output }
+        try {
+            // URL only: a <title> that differs from what's on screen ("Flow"
+            // over an h1 "Thread") pulled "what's the heading?" to none.
+            const res = await pickText({ question, blocks: state.blocks, minConfidence: this.minConfidence, where: async () => ({ url: page.url() }) })
+            count(res.usage)
+            const { usage, ...out } = res
+            return out
+        } catch (e) { if (e.usage) count(e.usage); throw e }
     }
 
     async snap({ session } = {}) {

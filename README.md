@@ -84,6 +84,7 @@ After changing UI, verify it in a real browser with jevb (one JSON object per
 command; exit 1 = error or failed check):
 - `jevb open <url>` · `jevb act <what to click>` · `jevb type <which field> -- <text>`
 - `jevb check <question about what's on screen>` · `jevb refute <question>`
+- `jevb read` prints the on-screen text; `jevb read <question>` returns the text that answers it.
 - `jevb snap` lists what jevb can click. Read it after a NO_MATCH, then rephrase.
 - Name visible text in checks: `check is a "Saved" toast shown?`, not `check did it work?`.
 - Use `--pace agent` for speed. Run `jevb stop` when done.
@@ -123,6 +124,13 @@ Each design choice below came from a measurement:
 - **Real controls, not just tags.** Clickable `<div>`s with a pointer cursor
   (the usual React pattern) count. So do custom checkboxes hidden at opacity
   0 under a styled label. Anything covered by a popup doesn't.
+- **Reading is a pick, too.** `jevb read <question>` splits the screen's
+  text into blocks, each with its kind and the text around it
+  (`text "$40" in "Red kettle … Add to cart"`), and Jev picks the block
+  that answers. The answer is page text, word for word, so it can't be made
+  up, and it costs one ~200ms call. If nothing on screen answers, you get
+  `NO_MATCH`. `jevb read` with no question returns the screen's text
+  without calling Jev.
 - **Checks ride along.** Consecutive checks share one Jev request, sent in
   parallel with the next step's pick. Checks always judge the screen
   *before* the action.
@@ -164,6 +172,7 @@ jevb run smoke.jevb --base http://localhost:5173 --pace agent
 | `type <field> => <text>` | pick a field and type; `${NAME}` comes from env or `./.env` and is never echoed |
 | `press <key>` | `Enter`, `Escape`, `Meta+K`; on phones `Back`, `HideKeyboard` |
 | `scroll [px\|end\|top]` | follows in-app scroll panels |
+| `read <question>` | the on-screen text that answers, verbatim, in the results |
 | `check <question>` | pass if Jev's noul ≥ 0.7 (`check@0.9` sets the bar) |
 | `refute <question>` | pass if noul < 0.3 |
 | `wait <ms>` · `shot <file>` · `pace human\|agent` | |
@@ -183,6 +192,7 @@ Top tabs shown?" scores about 0.8.
 | `check` / `refute <question>` | assert; `--threshold` |
 | `checks --check Q --refute Q …` | many checks in one Jev request |
 | `press <key>` · `scroll [dy\|end\|top]` | |
+| `read [question] [--full]` | no question: on-screen text and form fields (no Jev call); a question: the text that answers it, verbatim; `--full`: the whole page |
 | `snap` | the controls Jev chooses from |
 | `shot <path> [--full]` | screenshot |
 | `eval -- <js>` | run a function body in the page and print its result |

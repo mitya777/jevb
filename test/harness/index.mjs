@@ -51,9 +51,9 @@ const distribute = (scores) => {
 export function defaultAnswer(state, name, q) {
     if (q.type === 'choice') {
         const options = Object.entries(q.criteria).filter(([id]) => id !== 'none')
-        const quoted = state.intent.match(/"([^"]+)"/)?.[1]
+        const quoted = (state.intent ?? state.question).match(/"([^"]+)"/)?.[1]
         if (quoted) return distribute(options.map(([id, desc]) => [id, label(desc) === words(quoted).join(' ') ? 1 : 0]))
-        const want = new Set(words(state.intent))
+        const want = new Set(words((state.intent ?? state.question)))
         return distribute(options.map(([id, desc]) => [id, optionWords(desc).filter((w) => want.has(w)).length ** 3]))
     }
     if (q.type === 'noul') {
@@ -70,11 +70,13 @@ export async function fakeJev() {
     const requests = []
     let override = null
     let failures = [] // statuses to return before answering normally
+    let delayMs = 0 // answer this much later (tests of concurrency)
     const server = http.createServer(async (req, res) => {
         let raw = ''
         for await (const c of req) raw += c
         const body = JSON.parse(raw)
         requests.push({ ...body, auth: req.headers.authorization, at: Date.now() })
+        if (delayMs) await new Promise((r) => setTimeout(r, delayMs))
         if (failures.length) {
             res.writeHead(failures.shift(), { 'content-type': 'text/plain' })
             return res.end('upstream connect error')
@@ -101,7 +103,8 @@ export async function fakeJev() {
         checks: () => requests.filter((r) => !r.questions.target),
         answer(fn) { override = fn },
         fail(...statuses) { failures = statuses },
-        reset() { requests.length = 0; override = null; failures = [] },
+        delay(ms) { delayMs = ms },
+        reset() { requests.length = 0; override = null; failures = []; delayMs = 0 },
         close: () => new Promise((r) => { server.closeAllConnections(); server.close(r) }),
     }
 }

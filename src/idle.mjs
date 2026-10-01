@@ -12,4 +12,4 @@ export function trackBusy(obj, methods) {
     }
 }
 
-export const ACTIONS = ['open', 'act', 'type', 'press', 'scroll', 'checks', 'snap', 'screenshot']
+export const ACTIONS = ['open', 'act', 'type', 'press', 'scroll', 'checks', 'snap', 'screenshot', 'readText']

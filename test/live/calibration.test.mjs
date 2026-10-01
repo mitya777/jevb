@@ -14,7 +14,7 @@ import { after, before, test } from 'node:test'
 // The harness blanks the key; take the real one from the shell or jevb/.env.
 const envKey = process.env.JEVB_LIVE_KEY || (() => {
     const line = fs.existsSync(`${ROOT}/.env`) && fs.readFileSync(`${ROOT}/.env`, 'utf8').match(/^TYPESAFEAI_API_KEY=(.*)$/m)
-    return line?.[1].trim().replace(/^["']|["']$/g, '')
+    return line?.[1]?.trim().replace(/^["']|["']$/g, '')
 })()
 const live = process.env.JEVB_LIVE === '1' && envKey
 if (live) { process.env.TYPESAFEAI_API_KEY = envKey; delete process.env.TYPESAFE_ENDPOINT }
@@ -126,4 +126,41 @@ test('Hacker News: hide a story by title, and the first/last on screen', { skip:
         margins.push(`${got.confidence.toFixed(2)} pick  HN: ${intent} → ${got.desc.slice(0, 70)}`)
         assert.equal(href(got.desc), href(want), intent)
     }
+})
+
+// `jevb read <question>`: Jev picks the on-screen text that answers, and the
+// answer is that text verbatim. null = nothing on screen answers (NO_MATCH).
+const READS = {
+    'layouts.html': {
+        'What is the price of the red kettle?': '$40',
+        "What is Grace Hopper's email address?": 'grace@example.com',
+        'How many points does the spreadsheet story have?': '95 points by bob | hide | 12 comments',
+        'What is the status of the Globex invoice?': 'Globex, $860, overdue',
+        'What did eli say?': 'eli Spaces, always.',
+        'What is the price of the yellow chair?': null,
+    },
+    'flow.html': {
+        'What is the heading of this page?': 'Thread',
+    },
+}
+
+for (const [page, cases] of Object.entries(READS)) {
+    for (const [question, want] of Object.entries(cases)) {
+        test(`read on ${page}: ${question} → ${want ?? 'NO_MATCH'}`, { skip: SKIP }, async () => {
+            await b.open(site.url(page))
+            let got
+            try { got = await b.readText({ question }) } catch (e) { if (e.code !== 'NO_MATCH') throw e; got = { noMatch: true, confidence: e.detail.confidence, top: e.detail.top } }
+            margins.push(`${(got.confidence ?? 0).toFixed(2)} read  ${question} → ${got.noMatch ? 'NO_MATCH' : got.answer}`)
+            if (want === null) assert.ok(got.noMatch, `answered ${got.answer} (${got.confidence})`)
+            else assert.equal(got.answer, want, JSON.stringify(got.top))
+        })
+    }
+}
+
+test('Hacker News: read the top story\'s points', { skip: SKIP }, async () => {
+    await b.open('https://news.ycombinator.com/')
+    const got = await b.readText({ question: 'How many points does the first story have?' })
+    margins.push(`${got.confidence.toFixed(2)} read  HN: points of the first story → ${got.answer}`)
+    assert.match(got.answer, /^\d+ points by /)
+    assert.match(got.in || '', /^1\. /, 'the points row of the FIRST story')
 })

@@ -14,7 +14,7 @@ import path from 'node:path'
 import { deviceSnapshot, shortlist } from './device-snapshot.mjs'
 import { collect, readState } from './snapshot.mjs'
 import { startSession } from './devicefarm.mjs'
-import { judge } from './judge.mjs'
+import { judge, pickText } from './judge.mjs'
 import { labelControls, labelerEnabled, locateControl } from './labeler.mjs'
 import * as pace from './pace.mjs'
 import { ACTIONS, trackBusy } from './idle.mjs'
@@ -650,6 +650,23 @@ export class JevDevice {
 
     async check(question, { session, threshold, negate = false } = {}) {
         return (await this.checks([{ question, threshold, negate }], { session }))[0]
+    }
+
+    // `jevb read` on a phone (see JevBrowser.readText). Pages read like the
+    // desktop browser; native screens offer their visible text lines.
+    async readText({ session, question, full = false } = {}) {
+        const s = this.session(session)
+        if (s.webContext && full) return { text: String(await s.wd.execute('return document.body ? document.body.innerText : ""')).slice(0, 50_000) }
+        const state = s.webContext
+            ? await s.wd.execute(`return (${readState})(arguments[0])`, [{ maxText: 20_000, blocks: !!question }])
+            : (await this.read(s)).state
+        if (!question) { const { blocks, ...rest } = state; return rest }
+        const blocks = state.blocks || state.viewport_text.split('\n').filter(Boolean).map((text) => ({ text }))
+        const res = await pickText({ question, blocks, minConfidence: this.minConfidence, where: async () => ({ device: s.device, platform: s.platform }) })
+            .catch((e) => { if (e.usage) { this.jevRequests++; this.jevTokens.input += e.usage.input; this.jevTokens.output += e.usage.output } throw e })
+        this.jevRequests++; this.jevTokens.input += res.usage.input; this.jevTokens.output += res.usage.output
+        const { usage, ...out } = res
+        return out
     }
 
     async snap({ session } = {}) {

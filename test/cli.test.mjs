@@ -45,6 +45,17 @@ test('exit 1 on a failed check, refute, batch, or no match', async () => {
     assert.equal(json(miss).code, 'NO_MATCH')
 })
 
+test('read: state without a question, an answer with one, exit 1 when nothing answers', async () => {
+    await jevb('open', site.url('flow.html'), '--pace', 'agent')
+    const state = await jevb('read')
+    assert.equal(state.code, 0)
+    assert.match(json(state).viewport_text, /Post reply/)
+    const answer = await jevb('read', 'which', 'text', 'says', '"Third post"?')
+    assert.equal(answer.code, 0, answer.out)
+    assert.equal(json(answer).answer, 'Third post')
+    assert.equal((await jevb('read', 'what', 'is', 'the', 'weather?')).code, 1)
+})
+
 test('run: a scenario file exits 0 and reports Jev usage', async () => {
     const file = path.join(cwd, 'ok.jevb')
     fs.writeFileSync(file, 'pace agent\nopen flow.html\nact click "Post reply"\ncheck is "Posted:" shown?\n')

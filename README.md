@@ -26,7 +26,7 @@ Coding agents now make most UI changes, and an agent needs to *see* that its
 change works. The usual options both fall short:
 
 - **An LLM driving a browser from screenshots** works, but every step is a
-  large-model round trip. On one 23-step tour of a real site, an agent
+  large-model round trip. On one 23-step tour of [treechat.com](https://treechat.com), an agent
   driving the browser itself took 55–58s and cost about $0.75–0.95 per run.
   jevb ran the same tour in 18–26s for about $0.003 in Jev calls.
 - **Playwright with selectors** is fast, but the agent has to write and
@@ -279,14 +279,14 @@ from (see [.env.example](.env.example)). Shell variables win.
 
 ## Cost and speed
 
-Measured in September 2026 against a production web app:
+Measured in September 2026:
 
 | | |
 |---|---|
 | Jev call | 140–310ms |
 | Chromium cold start | 220–400ms |
 | [`examples/todomvc.jevb`](examples/todomvc.jevb), 6 checks and 8 actions | ~8s at agent pace, ~14s at human pace, 11 Jev calls |
-| A 23-step tour of a production site | 17–18s agent, ~48s human |
+| A 23-step tour of treechat.com | 17–18s agent, ~48s human |
 | The same tour, an LLM agent driving the browser itself | 55–58s and ~$0.75–0.95 per run, vs ~$0.003 in Jev calls |
 | Real phone on Device Farm | ~60–70s to the first command, then 0.5–1.5s per step |
 

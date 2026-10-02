@@ -14,8 +14,8 @@ import path from 'node:path'
 import { deviceSnapshot, shortlist } from './device-snapshot.mjs'
 import { collect, readState } from './snapshot.mjs'
 import { startSession } from './devicefarm.mjs'
-import { judge, pickText } from './judge.mjs'
-import { labelControls, labelerEnabled, locateControl } from './labeler.mjs'
+import { judge, pickText, waitForChecks, waitUntil } from './judge.mjs'
+import { locateControl, locateEnabled, screenText } from './locate.mjs'
 import * as pace from './pace.mjs'
 import { ACTIONS, trackBusy } from './idle.mjs'
 import { WebDriver } from './webdriver.mjs'
@@ -43,8 +43,6 @@ function scrollPage(to, dy) {
     else el.scrollBy({ top: dy, behavior: 'instant' })
 }
 
-// Labels that say nothing: the element type standing in for a missing name.
-const GENERIC_LABEL = /^(button|imagebutton|imageview|image|view|viewgroup|other|framelayout|linearlayout|clickable|)$/i
 
 const ANDROID_KEYS = { Enter: 66, Back: 4, Home: 3, Tab: 61, Escape: 111, Backspace: 67, Delete: 67 }
 
@@ -188,7 +186,7 @@ export class JevDevice {
 
     async read(s) {
         if (s.webContext) return this.readWeb(s)
-        const snap = deviceSnapshot(await s.wd.source(), s.screen)
+        const snap = await this.withScreenText(s, deviceSnapshot(await s.wd.source(), s.screen))
         if (s.platform !== 'ios' || snap.state.modal_open) return snap
         // iOS system alerts (permission prompts) belong to SpringBoard and
         // are missing from the app's source on Device Farm; the alert API
@@ -213,6 +211,35 @@ export class JevDevice {
         // browser: an SPA's loading placeholder has a stable layout too.
         const page = snap.state && s.webContext ? `\n${snap.state.viewport_text.length} ${await s.wd.execute('return document.readyState')}` : ''
         return { snap, key: (snap.all || snap.elements).map((e) => e.desc).join('\n') + page, ready: !page || page.endsWith('complete') && snap.state.viewport_text.length > 0 }
+    }
+
+    // Checks judge what the screen shows, read from the screenshot (Haiku),
+    // when an Anthropic key is set: an app's tree can lag the screen (an
+    // Android tree kept the previous page while its feed was visible). When
+    // the tree's text barely matches the screen, its elements are stale too,
+    // so none are offered and a tap goes to the screenshot fallback.
+    // JEVB_SCREEN_TEXT=off keeps the tree's text.
+    async withScreenText(s, snap) {
+        if (process.env.JEVB_SCREEN_TEXT === 'off' || !locateEnabled()) return snap
+        let text
+        try {
+            text = await screenText(await s.wd.screenshot())
+        } catch (e) {
+            if (!this.textWarned) this.log(`reading the screen from its screenshot failed: ${e.message.slice(0, 160)}`)
+            this.textWarned = true
+            return snap
+        }
+        if (!text) return snap
+        const words = (t) => (t || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((w) => w.length > 2)
+        const tree = words(snap.state.viewport_text), seen = new Set(words(text))
+        const overlap = tree.length ? tree.filter((w) => seen.has(w)).length / tree.length : 1
+        const stale = tree.length >= 5 && overlap < 0.3
+        if (stale) this.log(`accessibility tree doesn't match the screen (${Math.round(overlap * 100)}% of its words shown); using the screenshot`)
+        return {
+            ...snap,
+            elements: stale ? [] : snap.elements,
+            state: { ...snap.state, viewport_text: text.slice(0, 6000), from_screenshot: true },
+        }
     }
 
     // Wait for the layout to stop changing, capped. Human pace adds a
@@ -251,18 +278,27 @@ export class JevDevice {
 
     async find(intent, { session, checks } = {}) {
         const s = this.session(session)
-        let { target, el, checks: checkResults, snap } = await this.judge(s, { intent, checks })
-        const weak = () => target.id === 'none' || target.confidence < this.minConfidence || !el
-        // Unlabeled icons (an app's menu button reads as a bare "Button"):
-        // have Haiku name them from a screenshot and ask again, once.
-        const labeled = weak() && snap && await this.labelUnlabeled(s, snap)
-        if (labeled) {
-            ({ target, el } = await this.judge(s, { intent, snap: labeled }))
-            target.labeled = labeled.labeled
-        }
-        // Not in the tree at all (a clickable div with no role): find it on
-        // the screenshot, computer-use style, and tap there.
-        const seen = weak() && await this.locateVisually(s, intent)
+        const weakFor = (t, e) => t.id === 'none' || t.confidence < this.minConfidence || !e
+        // Wait until the target is on screen and the ride-along checks (which
+        // describe the screen before the action) pass, or JEVB_WAIT_MS ends.
+        // A screen with nothing usable in the tree (still loading, or a stale
+        // tree) is a weak match, not an error: wait, then the screenshot.
+        const attempt = () => this.judge(s, { intent, checks }).catch(async (e) => {
+            if (e.code !== 'NO_ELEMENTS') throw e
+            const r = checks?.length ? await this.judge(s, { checks }) : { checks: [] }
+            return { target: { id: 'none', confidence: 1, desc: 'nothing on screen in the accessibility tree' }, el: null, checks: r.checks, snap: null }
+        })
+        const waited = await waitUntil(attempt, (r) => !weakFor(r.target, r.el) && r.checks.every((c) => c.pass))
+        let { target, el, checks: checkResults, snap } = waited.result
+        if (waited.tries > 1) Object.assign(target, { tries: waited.tries, waitedMs: waited.waitedMs })
+        const weak = () => weakFor(target, el)
+        // No confident match (an unnamed control, or one missing from the
+        // tree like a clickable div with no role): Claude finds it on the
+        // screenshot, computer-use style. Model-written labels for unnamed
+        // controls were tried and dropped: Haiku got 3-4 of 8 right and a
+        // wrong one ("Open navigation menu" on the floating New button) made
+        // Jev tap it confidently.
+        const seen = weak() && await this.locateVisually(s, intent, snap)
         if (seen) ({ target, el } = seen)
         if (weak()) {
             throw Object.assign(new Error(`no confident match for "${intent}"`), { code: 'NO_MATCH', detail: target, checks: checkResults })
@@ -270,42 +306,10 @@ export class JevDevice {
         return { s, el, target, checks: checkResults }
     }
 
-    // Name a native screen's unlabeled controls with Claude Haiku (see
-    // labeler.mjs): one screenshot, positions as fractions of the screen.
-    // Returns a relabelled copy of snap, or null (web page, nothing unlabeled,
-    // no ANTHROPIC_API_KEY, or the call failed).
-    async labelUnlabeled(s, snap) {
-        if (s.webContext || !labelerEnabled()) return null // pages get class/icon hints instead
-        const todo = snap.elements.filter((e) => e.rect && GENERIC_LABEL.test(e.label.trim()))
-        if (!todo.length) return null
-        const png = await this.native(s, () => s.wd.screenshot())
-        const { w, h } = s.screen
-        const controls = todo.map((e) => ({ id: e.id, box: { x: e.rect.x / w, y: e.rect.y / h, w: e.rect.w / w, h: e.rect.h / h } }))
-        let res
-        try {
-            res = await labelControls(png, controls, { context: `${s.platform} app` })
-        } catch (e) {
-            if (!this.labelWarned) this.log(`labeling unlabeled controls failed: ${e.message.slice(0, 160)}`)
-            this.labelWarned = true
-            return null
-        }
-        const named = todo.filter((e) => typeof res.labels[e.id] === 'string' && res.labels[e.id].trim())
-        if (!named.length) return null
-        this.log(`Haiku named ${named.length} unlabeled controls in ${res.ms}ms${res.cached ? ' (cached)' : ''}`)
-        const label = new Map(named.map((e) => [e.id, res.labels[e.id].trim().replace(/"/g, "'").slice(0, 80)]))
-        return {
-            ...snap,
-            labeled: named.length,
-            elements: snap.elements.map((e) => (label.has(e.id)
-                ? { ...e, label: label.get(e.id), desc: e.desc.replace(/^(\S+) "[^"]*"/, `$1 "${label.get(e.id)}"`) }
-                : e)),
-        }
-    }
-
     // Returns { target, el } for a tap point found on the screenshot, or null
     // (web page, no ANTHROPIC_API_KEY, or the model found nothing).
-    async locateVisually(s, intent) {
-        if (s.webContext || !labelerEnabled()) return null // pages expose clickable divs to the DOM snapshot
+    async locateVisually(s, intent, snap) {
+        if (s.webContext || !locateEnabled()) return null // pages expose clickable divs to the DOM snapshot
         const png = await this.native(s, () => s.wd.screenshot())
         let at
         try {
@@ -315,11 +319,23 @@ export class JevDevice {
             return null
         }
         if (!at) return null
+        if (at.none) {
+            this.log(`screenshot fallback for "${intent}" found nothing (${at.ms}ms): ${at.said || 'no click'}`)
+            return null
+        }
         const k = at.width / s.screen.w // screenshot px per screen unit
         const [x, y] = [Math.round(at.x / k), Math.round(at.y / k)]
-        this.log(`located "${intent}" on the screenshot at ${x},${y} in ${at.ms}ms (not in the accessibility tree)`)
-        const el = { id: 'visual', role: 'visual', label: intent, x, y, rect: { x: x - 10, y: y - 10, w: 20, h: 20 }, desc: `visual target for "${intent}" at ${x},${y}` }
-        return { el, target: { id: 'visual', confidence: 1, desc: el.desc, visual: true, model: process.env.JEVB_LOCATE_MODEL || 'claude-sonnet-5' } }
+        // A tree element that IS the pointed-at control (its center within ~6%
+        // of the screen width of the point): tap its exact center. Not merely
+        // containing the point - a composer box under an open sidebar also
+        // contained the point for "Channels", and its center was 300px away.
+        const near = 0.06 * s.screen.w
+        const inside = (snap?.elements || []).filter((e) => e.rect && x >= e.rect.x && x <= e.rect.x + e.rect.w && y >= e.rect.y && y <= e.rect.y + e.rect.h
+            && Math.hypot(e.x - x, e.y - y) <= near)
+            .sort((p, q) => p.rect.w * p.rect.h - q.rect.w * q.rect.h)[0]
+        const el = inside || { id: 'visual', role: 'visual', label: intent, x, y, rect: { x: x - 10, y: y - 10, w: 20, h: 20 }, desc: `visual target${at.said ? ` "${at.said.replace(/"/g, "'")}"` : ''} for "${intent}" at ${x},${y}` }
+        this.log(`located "${intent}" on the screenshot at ${x},${y} in ${at.ms}ms${at.said ? ` ("${at.said}")` : ''}${inside ? ` -> ${inside.desc}` : ' (not in the accessibility tree)'}`)
+        return { el, target: { id: el.id, confidence: 1, desc: el.desc, visual: true, model: process.env.JEVB_LOCATE_MODEL || 'claude-sonnet-5' } }
     }
 
     // ---- gestures --------------------------------------------------------
@@ -475,7 +491,17 @@ export class JevDevice {
         // Web fields and iOS append each element send. UiAutomator2 replaces
         // the whole value (and key events go through the IME, which
         // autocapitalizes), so native Android sets prefix + typed-so-far.
-        const field = el.web ? tapped : await s.wd.activeElement()
+        const field = el.web ? tapped : await s.wd.activeElement().catch(() => null)
+        // A stale tree (an Android WebView's) can hide the focused field from
+        // WebDriver: the tap (often a screenshot one) focused it, so type as
+        // key presses into whatever has focus. No read-back possible.
+        if (!field) {
+            await s.wd.actions([{ type: 'key', id: 'keyboard', actions: [...text].flatMap((c) => [{ type: 'keyDown', value: c }, { type: 'keyUp', value: c }]) }])
+            await s.wd.releaseActions()
+            if (submit) await this.press('Enter', { session, pace: pc })
+            else await this.settle(s, pc)
+            return { typed: target, chars: text.length, keys: true, checks: checkResults }
+        }
         const replaces = !el.web && s.platform === 'android'
         const prefix = replaces ? el.value || '' : ''
         // Password fields read back masked, and their text must never reach a
@@ -644,8 +670,8 @@ export class JevDevice {
         return { scrolled: to || Number(dy) }
     }
 
-    async checks(items, { session } = {}) {
-        return (await this.judge(this.session(session), { checks: items })).checks
+    async checks(items, { session, waitMs } = {}) {
+        return waitForChecks(() => this.judge(this.session(session), { checks: items }).then((r) => r.checks), waitMs)
     }
 
     async check(question, { session, threshold, negate = false } = {}) {

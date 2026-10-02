@@ -162,5 +162,8 @@ test('Hacker News: read the top story\'s points', { skip: SKIP }, async () => {
     const got = await b.readText({ question: 'How many points does the first story have?' })
     margins.push(`${got.confidence.toFixed(2)} read  HN: points of the first story → ${got.answer}`)
     assert.match(got.answer, /^\d+ points by /)
-    assert.match(got.in || '', /^1\. /, 'the points row of the FIRST story')
+    // The first story's own points row, as the page has it (a long title can
+    // push "1." out of the context window, so compare with the DOM).
+    const first = await (await b.page()).evaluate(() => document.querySelector('.subline, .subtext')?.innerText.replace(/\s+/g, ' ').trim())
+    assert.equal(got.answer, first, 'the points row of the FIRST story')
 })

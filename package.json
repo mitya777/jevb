@@ -49,7 +49,8 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.129.0",
     "@aws-sdk/client-device-farm": "^3.1141.0",
-    "playwright-core": "1.57.0"
+    "playwright-core": "1.57.0",
+    "pngjs": "^7.0.0"
   },
   "homepage": "https://github.com/mitya777/jevb#readme",
   "bugs": {

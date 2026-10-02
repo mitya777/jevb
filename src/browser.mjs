@@ -44,7 +44,7 @@ export class JevBrowser {
             const b = this.cdpUrl
                 ? await chromium.connectOverCDP(this.cdpUrl)
                 : await chromium.launch({ headless: this.headless })
-            b.on('disconnected', () => { this.browser = null; this.sessions.clear(); this.overlayAdded = false })
+            b.on('disconnected', () => { this.browser = null; this.sessions.clear() })
             this.log(`${this.cdpUrl ? `attached to ${this.cdpUrl}` : 'chromium up'} in ${Date.now() - t}ms`)
             return b
         })()
@@ -90,9 +90,12 @@ export class JevBrowser {
         const browser = await this.ensureBrowser()
         if (this.cdpUrl) {
             // A new tab in Chrome's default (profile) context, at its real window size.
+            // The profile context also holds the user's own tabs, so the demo
+            // overlay goes on jevb's tab only, never the shared context.
             const context = browser.contexts()[0]
-            if (this.demo && !this.overlayAdded) { await context.addInitScript(OVERLAY); this.overlayAdded = true }
-            s = { context, page: await context.newPage() }
+            const page = await context.newPage()
+            if (this.demo) await page.addInitScript(OVERLAY)
+            s = { context, page }
             this.sessions.set(name, s)
             return s.page
         }

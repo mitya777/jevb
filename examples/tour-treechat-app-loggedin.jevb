@@ -1,0 +1,70 @@
+# Logged-in tour of the Treechat app on a real phone: feed, tabs, posts,
+# search, notifications, sidebar, channels. Read-only: never posts, replies,
+# joins or upvalues (use a test account with no sats). The account comes from
+# the environment (or ./.env): TREECHAT_EMAIL, TREECHAT_PASSWORD.
+#   jevb run examples/tour-treechat-app-loggedin.jevb --device "pixel 9" --app treechat.apk --pace agent
+
+open
+act? dismiss the notifications permission prompt without allowing
+check is this a login page?
+type the email field => ${TREECHAT_EMAIL}
+type the password field => ${TREECHAT_PASSWORD}
+press HideKeyboard
+act log in
+refute is an error or "wrong password" message shown?
+refute is the login page still shown?
+
+# The app reopens wherever this account last was (a Channels page, say):
+# start from the home feed.
+act go to the Home feed with the house icon in the bottom bar
+check is the home feed with posts shown?
+
+# The feed
+scroll 1500
+check are posts shown?
+scroll top
+act? switch the feed's sort to Hot (the small Hot tab beside Now, under Public and Following)
+check are posts shown?
+act? switch the feed's sort back to Now (the small Now tab beside Hot)
+act? switch to the Following tab
+act? switch back to the Public tab
+
+# Open a post and come back. Android's Back button on a post closes the
+# production app (to the phone's home screen), so go back in the app.
+act open the first post in the feed by tapping the text under its author's name, or its card's author row if it has no text
+check is a single post or conversation thread shown?
+act go back to the feed with the back arrow at the top left
+check is the home feed shown?
+scroll 1200
+act open a post by tapping its card's author row (not an embedded tweet, link or image: those open outside the app)
+check is a single post or conversation thread shown?
+refute is a web browser shown instead of the Treechat app?
+scroll 800
+act go back to the feed with the back arrow at the top left
+
+# Search
+act open search
+type the search field => ordinals
+press Enter
+check are search results shown?
+act go to the Home feed with the house icon in the bottom bar
+
+# Notifications
+act open notifications
+check are notifications shown?
+act go to the Home feed with the house icon in the bottom bar
+
+# Sidebar: channels, memes, home
+act open the sidebar menu
+act open the Channels page
+check is a list of channels shown?
+act open the first channel in the list
+check is a channel's stream of posts shown?
+scroll 1200
+act go back with the back arrow at the top left
+act open the sidebar menu
+act? open Memes
+check is a page of memes shown?
+act open the sidebar menu
+act go to Home
+check is the home feed shown?

@@ -3,7 +3,7 @@
 // (fresh) on the next one. Sessions are named browser contexts.
 import { chromium } from 'playwright-core'
 import { OVERLAY } from './demo.mjs'
-import { judge, pickText } from './judge.mjs'
+import { judge, pickText, waitForChecks, waitUntil } from './judge.mjs'
 import * as pace from './pace.mjs'
 import { ACTIONS, trackBusy } from './idle.mjs'
 import { pageState, readState, shortlist, snapshot } from './snapshot.mjs'
@@ -154,8 +154,13 @@ export class JevBrowser {
     // calling agent can rephrase.
     async find(intent, { session, checks } = {}) {
         const page = await this.page(session)
-        const { target, checks: checkResults } = await this.judge(page, { intent, checks })
-        if (target.id === 'none' || target.confidence < this.minConfidence) {
+        const weak = (t) => t.id === 'none' || t.confidence < this.minConfidence
+        // Wait until the target is on screen and the ride-along checks pass,
+        // or JEVB_WAIT_MS ends (see waitUntil).
+        const waited = await waitUntil(() => this.judge(page, { intent, checks }), (r) => !weak(r.target) && r.checks.every((c) => c.pass))
+        const { target, checks: checkResults } = waited.result
+        if (waited.tries > 1) Object.assign(target, { tries: waited.tries, waitedMs: waited.waitedMs })
+        if (weak(target)) {
             throw Object.assign(new Error(`no confident match for "${intent}"`), { code: 'NO_MATCH', detail: target, checks: checkResults })
         }
         return { page, locator: page.locator(`[data-jevb="${target.id}"]`), target, checks: checkResults }
@@ -210,9 +215,9 @@ export class JevBrowser {
 
     // Test assertions: Jev nouls over the visible page, all in one request.
     // pass = noul >= threshold (0.7), or for negate/refute noul < threshold (0.3).
-    async checks(items, { session } = {}) {
+    async checks(items, { session, waitMs } = {}) {
         const page = await this.page(session)
-        return (await this.judge(page, { checks: items })).checks
+        return waitForChecks(() => this.judge(page, { checks: items }).then((r) => r.checks), waitMs)
     }
 
     async check(question, { session, threshold, negate = false } = {}) {

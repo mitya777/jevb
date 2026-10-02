@@ -157,6 +157,10 @@ Each design choice below came from a measurement:
   up, and it costs one ~200ms call. If nothing on screen answers, you get
   `NO_MATCH`. `jevb read` with no question returns the screen's text
   without calling Jev.
+- **It waits like Playwright.** A failing check, or an action whose target
+  isn't on screen yet, is re-judged every 0.6s for up to `JEVB_WAIT_MS`
+  (default 4s; 0 turns it off), so a list behind a spinner or the screen
+  right after logging in doesn't fail the step.
 - **Checks ride along.** Consecutive checks share one Jev request, sent in
   parallel with the next step's pick. Checks always judge the screen
   *before* the action.
@@ -308,29 +312,36 @@ jevb open --device "emulator" --platform android --app app-debug.apk    # a runn
 - Simulators are slower than Device Farm phones: 7–17s per tap on an iPhone
   16 simulator, against 0.5–1.5s on Device Farm.
 
-### Controls with no name: Claude fallbacks
+### Controls with no name: the Claude fallback
 
-Native apps often have icon buttons with no accessible name, which reach
-Jev as a bare "Button". With `ANTHROPIC_API_KEY` set (in the environment or
-`./.env`), jevb escalates in two steps, only when Jev finds no confident
-match:
+Native apps often have icon buttons with no accessible name (they reach Jev
+as a bare "Button"), or clickable views missing from the tree entirely
+(Android doesn't expose a clickable `<div>` with no role). With
+`ANTHROPIC_API_KEY` set (in the environment or `./.env`), jevb has one
+fallback when Jev finds no confident match on an app screen:
 
-1. **Claude Haiku names them.** jevb sends one screenshot with the unnamed
-   controls' boxes, and Haiku labels each one ("Open navigation menu"). Then
-   Jev is asked again. This costs about 2–3k tokens per screen and is cached
-   by layout. In testing, Jev picked an app's unlabeled menu button at 0.99
-   once Haiku had named it, against no match before.
-2. **Claude Sonnet locates the control.** Some controls aren't in the
-   accessibility tree at all (Android doesn't expose a clickable `<div>` with
-   no role). As a last resort, Claude Sonnet uses computer use to say where
-   on the screenshot to tap, and jevb taps there (the pick reports `visual`).
-   It costs about 6k tokens (1–2 cents) and takes 1.5–4s, and it hit 4 of
-   5 test targets. Asking a model for "x,y" in plain text was off by 100px
-   or more.
+- **Claude Sonnet locates the control.** jevb sends the screenshot (shrunk to
+  at most 720px wide) and the intent, and Claude's computer use says where to
+  tap. If that point falls inside a real control in the tree, jevb taps that
+  control's center; otherwise it taps the point (the pick reports `visual`).
+  It costs about 6k tokens (1–2 cents) and 1.5–4s, and it hit 4 of 5 test
+  targets. Asking a model for "x,y" in plain text was off by 100px or more.
+- **Naming controls first was tried and dropped.** Having Claude Haiku label
+  the unnamed controls got 3–4 of 8 right, and one confident wrong label led
+  to a wrong tap.
 
-`JEVB_LABEL_MODEL` and `JEVB_LOCATE_MODEL` swap the models (defaults
-`claude-haiku-4-5` and `claude-sonnet-5`). An accessible name in your app is
-still the real fix, and makes jevb faster too.
+App screens are also read from their screenshots when the tree lags. After
+an in-app navigation, an Android tree can still hold the previous screen
+while the new one is plainly visible. With `ANTHROPIC_API_KEY` set, checks on
+app screens judge the text Claude Haiku reads from the screenshot (1–6s,
+cached per image). The tree's form fields are kept, so passwords stay
+masked. If the tree's text barely matches the screen (under 30% word
+overlap), its elements count as stale and taps go to the Sonnet fallback.
+`JEVB_SCREEN_TEXT=off` keeps the tree's text.
+
+`JEVB_LOCATE_MODEL` swaps the locating model (default `claude-sonnet-5`). An
+accessible name in your app is still the real fix, and makes jevb faster
+too.
 
 <details>
 <summary>Device Farm setup and more phone details</summary>
@@ -370,6 +381,7 @@ from (see [.env.example](.env.example)). Shell variables win.
 |---|---|
 | `TYPESAFEAI_API_KEY` (or `TYPESAFE_API_KEY`) | **required**, from [console.typesafe.ai/keys](https://console.typesafe.ai/keys) |
 | `JEVB_PACE` | `human` (default) or `agent` |
+| `JEVB_WAIT_MS` | how long checks and actions wait for the screen (4000; 0 = off) |
 | `JEVB_HEADED=1` · `JEVB_DEMO=1` · `JEVB_VIDEO=<dir>` | show the window · draw a cursor and a HUD of Jev's picks · record a `.webm` per session |
 | `JEVB_IDLE_MS` · `JEVB_DAEMON_IDLE_MS` · `JEVB_PORT` | browser idle close (2 min) · daemon exit (15 min) · daemon port (7788) |
 | `JEVB_CDP_URL` · `JEVB_CLOSE_TABS=1` | attach to a running Chrome · close jevb's tabs on idle and `stop` |
@@ -377,7 +389,7 @@ from (see [.env.example](.env.example)). Shell variables win.
 | `AWS_ACCESS_KEY_ID` · `AWS_SECRET_ACCESS_KEY` · `AWS_SESSION_TOKEN` · `JEVB_AWS_PROFILE` | Device Farm credentials (see *Phones and simulators*) |
 | `JEVB_DF_PROJECT_ARN` · `JEVB_DEVICE_IDLE_MS` | Device Farm project · release an idle phone (3 min) |
 | `JEVB_APPIUM_URL` · `JEVB_APPIUM_UDID` | local Appium |
-| `ANTHROPIC_API_KEY` · `JEVB_LABEL_MODEL` · `JEVB_LOCATE_MODEL` | Claude fallbacks for unnamed native controls (Haiku names, Sonnet locates) |
+| `ANTHROPIC_API_KEY` · `JEVB_LOCATE_MODEL` · `JEVB_TEXT_MODEL` · `JEVB_SCREEN_TEXT=off` | the Claude fallback for native apps (Sonnet locates unnamed controls; Haiku reads lagging screens) |
 | `JEV_MODEL` · `TYPESAFE_ENDPOINT` | Jev model (default `jev-latest`) · another Jev-compatible endpoint |
 | `GH_TOKEN` / `GITHUB_TOKEN` | lets `jevb update` read releases while the repo is private (otherwise your `gh` login is used) |
 

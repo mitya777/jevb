@@ -247,6 +247,8 @@ Sign in once in that window. jevb sessions then open as tabs in that profile,
 with its cookies and saved passwords. Idle and `stop` detach but leave jevb's
 tabs open, so a page you're signed in to stays put; `close` closes its tab.
 Set `JEVB_CLOSE_TABS=1` to close jevb's tabs on idle and `stop` too.
+jevb opens its tabs in the background, so the browser window never jumps to
+the front while you work; set `JEVB_FOREGROUND=1` to focus them instead.
 
 ## Phones and simulators
 
@@ -384,7 +386,7 @@ from (see [.env.example](.env.example)). Shell variables win.
 | `JEVB_WAIT_MS` | how long checks and actions wait for the screen (4000; 0 = off) |
 | `JEVB_HEADED=1` · `JEVB_DEMO=1` · `JEVB_VIDEO=<dir>` | show the window · draw a cursor and a HUD of Jev's picks · record a `.webm` per session |
 | `JEVB_IDLE_MS` · `JEVB_DAEMON_IDLE_MS` · `JEVB_PORT` | browser idle close (2 min) · daemon exit (15 min) · daemon port (7788) |
-| `JEVB_CDP_URL` · `JEVB_CLOSE_TABS=1` | attach to a running Chrome · close jevb's tabs on idle and `stop` |
+| `JEVB_CDP_URL` · `JEVB_CLOSE_TABS=1` · `JEVB_FOREGROUND=1` | attach to a running Chrome · close jevb's tabs on idle and `stop` · focus jevb's tabs instead of opening them in the background |
 | `JEVB_CDP_PORT` · `JEVB_CHROME_PROFILE` · `JEVB_CHROME_PROFILE_DIR` | for `bin/jevb-chrome.sh`: DevTools port (9333) · profile folder (`~/.jevb/chrome-profile`) · which Chrome profile inside it to open |
 | `AWS_ACCESS_KEY_ID` · `AWS_SECRET_ACCESS_KEY` · `AWS_SESSION_TOKEN` · `JEVB_AWS_PROFILE` | Device Farm credentials (see *Phones and simulators*) |
 | `JEVB_DF_PROJECT_ARN` · `JEVB_DEVICE_IDLE_MS` | Device Farm project · release an idle phone (3 min) |

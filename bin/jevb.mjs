@@ -54,7 +54,8 @@ Pace: human (default) = curved mouse, hover dwell, per-key typing, reading
 pauses. agent = as fast as possible. Env: TYPESAFEAI_API_KEY (or ./.env),
 JEVB_PACE, JEVB_PORT, JEVB_IDLE_MS (chromium), JEVB_DAEMON_IDLE_MS, JEVB_HEADED=1,
 JEVB_DEMO=1 (visible cursor + Jev HUD), JEVB_VIDEO=<dir> (record .webm),
-JEVB_CDP_URL (attach to a running Chrome, e.g. from bin/jevb-chrome.sh).
+JEVB_CDP_URL (attach to a running Chrome, e.g. from bin/jevb-chrome.sh; tabs open in
+the background unless JEVB_FOREGROUND=1).
 Devices: AWS credentials (AWS_PROFILE etc.), JEVB_DF_PROJECT_ARN (default:
 project "jevb"), JEVB_DEVICE_IDLE_MS (release an idle phone, default 3 min),
 JEVB_APPIUM_URL (use a local Appium instead of Device Farm).`

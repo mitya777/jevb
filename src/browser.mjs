@@ -16,6 +16,7 @@ const CDP_URL = process.env.JEVB_CDP_URL || null
 // In attached Chrome, idle and `stop` only detach and leave jevb's tabs open;
 // `close` still closes its tab. JEVB_CLOSE_TABS=1 closes them on detach too.
 const CLOSE_TABS = process.env.JEVB_CLOSE_TABS === '1'
+const FOREGROUND = process.env.JEVB_FOREGROUND === '1'
 
 export class JevBrowser {
     constructor({ idleMs = DEFAULT_IDLE_MS, pace: p, headless = process.env.JEVB_HEADED !== '1',
@@ -92,7 +93,7 @@ export class JevBrowser {
             // A new tab in Chrome's default (profile) context, at its real window size.
             const context = browser.contexts()[0]
             if (this.demo && !this.overlayAdded) { await context.addInitScript(OVERLAY); this.overlayAdded = true }
-            s = { context, page: await context.newPage() }
+            s = { context, page: await this.newTab(browser, context) }
             this.sessions.set(name, s)
             return s.page
         }
@@ -105,6 +106,21 @@ export class JevBrowser {
         s = { context, page }
         this.sessions.set(name, s)
         return page
+    }
+
+    // Attached browsers are the user's own, so open jevb's tab in the
+    // background and leave their window where it is. JEVB_FOREGROUND=1 opts
+    // back in to a focused tab (Chrome raises the window for it).
+    async newTab(browser, context) {
+        if (FOREGROUND) return context.newPage()
+        const cdp = await browser.newBrowserCDPSession()
+        try {
+            const [page] = await Promise.all([
+                context.waitForEvent('page'),
+                cdp.send('Target.createTarget', { url: 'about:blank', background: true }),
+            ])
+            return page
+        } finally { await cdp.detach().catch(() => {}) }
     }
 
     // Demo HUD: line 1 = current step, line 2 = what Jev decided.

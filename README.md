@@ -214,7 +214,9 @@ export JEVB_CDP_URL=http://127.0.0.1:9333
 ```
 
 Sign in once in that window. jevb sessions then open as tabs in that profile,
-with its cookies and saved passwords. `stop` closes only jevb's tabs.
+with its cookies and saved passwords. Idle and `stop` detach but leave jevb's
+tabs open, so a page you're signed in to stays put; `close` closes its tab.
+Set `JEVB_CLOSE_TABS=1` to close jevb's tabs on idle and `stop` too.
 
 ## Phones and simulators
 

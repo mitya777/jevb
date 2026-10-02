@@ -13,6 +13,9 @@ const DEFAULT_IDLE_MS = Number(process.env.JEVB_IDLE_MS || 120_000)
 // launching Chromium. Sessions become tabs in that Chrome's own profile, so
 // its cookies, sign-ins and Password Manager apply.
 const CDP_URL = process.env.JEVB_CDP_URL || null
+// In attached Chrome, idle and `stop` only detach and leave jevb's tabs open;
+// `close` still closes its tab. JEVB_CLOSE_TABS=1 closes them on detach too.
+const CLOSE_TABS = process.env.JEVB_CLOSE_TABS === '1'
 
 export class JevBrowser {
     constructor({ idleMs = DEFAULT_IDLE_MS, pace: p, headless = process.env.JEVB_HEADED !== '1',
@@ -55,7 +58,7 @@ export class JevBrowser {
         this.idleTimer.unref?.()
     }
 
-    async shutdown(reason = 'stop') {
+    async shutdown(reason = 'stop', { closeTabs = CLOSE_TABS } = {}) {
         clearTimeout(this.idleTimer)
         const b = this.browser
         this.browser = null
@@ -64,8 +67,9 @@ export class JevBrowser {
         const videos = []
         for (const { context, page } of this.sessions.values()) {
             const v = page.video()
-            // Attached Chrome: close only our tab; its profile context isn't ours.
-            await (this.cdpUrl ? page.close() : context.close()).catch(() => {})
+            // Attached Chrome: close only our tab (if asked); its profile context isn't ours.
+            if (!this.cdpUrl) await context.close().catch(() => {})
+            else if (closeTabs) await page.close().catch(() => {})
             if (v) videos.push(await v.path().catch(() => null))
         }
         this.sessions.clear()

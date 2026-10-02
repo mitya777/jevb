@@ -1,6 +1,6 @@
 # jevb
 
-**Browser and phone tests in plain English, built for coding agents and CI.**
+**Browser and phone use for AI agents, in plain English. The agent says what it wants; a small model finds it.**
 
 ```bash
 jevb open https://demo.playwright.dev/todomvc/
@@ -10,11 +10,12 @@ jevb act mark "Buy oat milk" as done             # picks: input "Toggle Todo" in
 jevb check does the counter say "1 item left"?    # pass → exit 0
 ```
 
-No selectors and no screenshots sent to a large model. jevb drives a real
-browser (or a real iPhone or Android phone). A small, fast model,
-[Jev](https://docs.typesafe.ai), answers only the two questions that need
-understanding: *which element did you mean?* and *does the screen show this?*
-Each answer takes about 150–300ms. Code does everything else.
+No selectors, and no page snapshots in your agent's context. jevb drives a
+real browser (or a real iPhone or Android phone). A small, fast decision
+model, [Jev](https://docs.typesafe.ai), answers the questions that need
+understanding: *which element did you mean?*, *does the screen show this?*,
+*which text answers this?* Each answer takes about 150–300ms, and your
+agent reads back a short JSON object.
 
 MIT · Node 22+ · headless Chromium, your own Chrome, iOS and Android
 
@@ -22,27 +23,52 @@ MIT · Node 22+ · headless Chromium, your own Chrome, iOS and Android
 
 ## Why
 
-Coding agents now make most UI changes, and an agent needs to *see* that its
-change works. The usual options both fall short:
+To use a browser, an agent has to decide what to click. Today it does that
+one of two ways:
 
-- **An LLM driving a browser from screenshots** works, but every step is a
-  large-model round trip. On one 23-step tour of [treechat.com](https://treechat.com), an agent
-  driving the browser itself took 55–58s and cost about $0.75–0.95 per run.
-  jevb ran the same tour in 18–26s for about $0.003 in Jev calls.
-- **Playwright with selectors** is fast, but the agent has to write and
-  maintain selectors for markup it didn't design. "Is the right thing on
-  screen?" becomes custom assertion code, and the selectors break on the
-  next redesign.
+- **Selectors** (Playwright and similar scripts). Fast, but someone has to
+  know the page in advance and write them. That doesn't work for "go change
+  this setting" on a page the agent has never seen, and the selectors break
+  on the next redesign.
+- **Reading the page** (Playwright MCP, Claude in Chrome, IDE browser
+  panes). The tool hands the model an accessibility snapshot of the whole
+  page, and the model picks an element from it. No selectors, but every step
+  makes your most expensive model read thousands of tokens, and the
+  snapshots pile up in its context.
 
-jevb sits in between. Steps read the way a person would describe them
-(`act open the settings`, `check is a sign-up form shown?`), so they survive
-redesigns and anyone can review them. Each step costs one small-model call,
-not a frontier-model turn. When jevb isn't sure, it says so: a low-confidence
-pick returns `NO_MATCH` with the top candidates instead of guessing a click.
+jevb takes a third way. The agent states its intent in a sentence, a small
+decision model picks the element, and the agent gets back about 20 tokens.
+Here is one step on three real pages, measured October 2026:
 
-Plain Playwright is still faster per step. Reach for jevb where
-selectors are the bottleneck: an agent checking its own work, smoke tests
-that outlive redesigns, and real phones.
+| Page | Snapshot the agent reads to pick | What jevb returns | jevb's pick |
+|---|---|---|---|
+| [treechat.com](https://treechat.com/stream/public) | ~5,800 tokens | ~15 tokens | the "Hot" tab, 0.93 |
+| [news.ycombinator.com](https://news.ycombinator.com) | ~9,900 tokens | ~20 tokens | the first story's comments, 0.84 |
+| [github.com/microsoft/playwright](https://github.com/microsoft/playwright) | ~11,800 tokens | ~23 tokens | the "Issues" tab, 0.90 |
+
+Over a 20-step task, that's 120–240k tokens of snapshots against a few
+thousand with jevb, so long browser tasks fit in context and each step
+costs a ~200ms small-model call instead of a frontier-model read. End to
+end, a 23-step tour of treechat.com took 18–26s and about $0.003 in Jev
+calls, against 55–58s and $0.75–0.95 with the agent driving the browser
+itself.
+
+The tradeoff is visibility. A snapshot tool shows the agent everything; jevb
+shows it what it asks for:
+
+- `jevb read` returns the screen's text (150–750 tokens on those pages), and
+  `jevb read <question>` returns just the text that answers it.
+- `jevb check <question>` asks a yes/no about the screen.
+- When jevb isn't sure, it says so: a low-confidence pick returns `NO_MATCH`
+  with the top candidates instead of guessing a click. A *confident* wrong
+  pick is visible only in the one-line description jevb reports back.
+- Complex widgets (canvas, drag and drop, maps) may still need `jevb eval`
+  or a snapshot tool.
+
+For fixed regression tests on pages you control, plain Playwright is still
+faster, free and deterministic. jevb is for everything else: an agent using
+a site it doesn't know, checking its own UI work, smoke tests that should
+outlive redesigns, and real phones.
 
 ## Quick start
 
@@ -342,16 +368,18 @@ from (see [.env.example](.env.example)). Shell variables win.
 
 | Variable | |
 |---|---|
-| `TYPESAFEAI_API_KEY` | **required**, from [console.typesafe.ai/keys](https://console.typesafe.ai/keys) |
+| `TYPESAFEAI_API_KEY` (or `TYPESAFE_API_KEY`) | **required**, from [console.typesafe.ai/keys](https://console.typesafe.ai/keys) |
 | `JEVB_PACE` | `human` (default) or `agent` |
 | `JEVB_HEADED=1` · `JEVB_DEMO=1` · `JEVB_VIDEO=<dir>` | show the window · draw a cursor and a HUD of Jev's picks · record a `.webm` per session |
 | `JEVB_IDLE_MS` · `JEVB_DAEMON_IDLE_MS` · `JEVB_PORT` | browser idle close (2 min) · daemon exit (15 min) · daemon port (7788) |
-| `JEVB_CDP_URL` | attach to a running Chrome |
+| `JEVB_CDP_URL` · `JEVB_CLOSE_TABS=1` | attach to a running Chrome · close jevb's tabs on idle and `stop` |
+| `JEVB_CDP_PORT` · `JEVB_CHROME_PROFILE` · `JEVB_CHROME_PROFILE_DIR` | for `bin/jevb-chrome.sh`: DevTools port (9333) · profile folder (`~/.jevb/chrome-profile`) · which Chrome profile inside it to open |
 | `AWS_ACCESS_KEY_ID` · `AWS_SECRET_ACCESS_KEY` · `AWS_SESSION_TOKEN` · `JEVB_AWS_PROFILE` | Device Farm credentials (see *Phones and simulators*) |
 | `JEVB_DF_PROJECT_ARN` · `JEVB_DEVICE_IDLE_MS` | Device Farm project · release an idle phone (3 min) |
 | `JEVB_APPIUM_URL` · `JEVB_APPIUM_UDID` | local Appium |
 | `ANTHROPIC_API_KEY` · `JEVB_LABEL_MODEL` · `JEVB_LOCATE_MODEL` | Claude fallbacks for unnamed native controls (Haiku names, Sonnet locates) |
-| `JEV_MODEL` | Jev model (default `jev-latest`) |
+| `JEV_MODEL` · `TYPESAFE_ENDPOINT` | Jev model (default `jev-latest`) · another Jev-compatible endpoint |
+| `GH_TOKEN` / `GITHUB_TOKEN` | lets `jevb update` read releases while the repo is private (otherwise your `gh` login is used) |
 
 ## Cost and speed
 

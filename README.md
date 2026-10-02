@@ -26,7 +26,7 @@ Coding agents now make most UI changes, and an agent needs to *see* that its
 change works. The usual options both fall short:
 
 - **An LLM driving a browser from screenshots** works, but every step is a
-  large-model round trip. On one 23-step tour of a real site, an agent
+  large-model round trip. On one 23-step tour of [treechat.com](https://treechat.com), an agent
   driving the browser itself took 55–58s and cost about $0.75–0.95 per run.
   jevb ran the same tour in 18–26s for about $0.003 in Jev calls.
 - **Playwright with selectors** is fast, but the agent has to write and
@@ -206,32 +206,96 @@ export JEVB_CDP_URL=http://127.0.0.1:9333
 Sign in once in that window. jevb sessions then open as tabs in that profile,
 with its cookies and saved passwords. `stop` closes only jevb's tabs.
 
-## Real phones
+## Phones and simulators
 
-The same commands drive a real iPhone or Android phone. jevb reads the
-device's accessibility tree, and taps, swipes and typing are touch gestures.
+The same commands drive an iPhone or Android phone: a real one on AWS Device
+Farm, or a simulator, emulator or USB phone through your own Appium. jevb
+reads the device's accessibility tree, and taps, swipes and typing are touch
+gestures.
 
 ```bash
-jevb devices --platform ios
-jevb open https://example.com --device "iphone 15"        # Safari on a real iPhone
+jevb open https://example.com --device "iphone 15"        # Safari on the phone
 jevb open --device "pixel 9" --app build/app.apk            # install and launch an app
 jevb act open the settings
-jevb close                                                  # stops the billed session
+jevb close                                                  # ends the session
 ```
 
-- **AWS Device Farm** (pay per device minute, us-west-2): any AWS
-  credentials with `AWSDeviceFarmFullAccess`. jevb picks up an AWS profile
-  named `jevb` automatically. A phone takes about a minute to start. jevb
-  stops it on `close`, on `stop`, on errors, and after 3 idle minutes.
-- **Local Appium** (free): set `JEVB_APPIUM_URL=http://127.0.0.1:4723` for a
-  simulator, an emulator or a USB phone.
-- **Unlabeled controls** (icon buttons with no accessible name): with
-  `ANTHROPIC_API_KEY` set, Claude Haiku names them from one screenshot. As a
-  last resort, Claude's computer use locates the control on screen. An
-  accessible name in your app is still the real fix.
+### Real phones on AWS Device Farm
+
+Pay per device minute, us-west-2 only. `jevb devices --platform ios` lists
+what you can open. A phone takes about a minute to start, and jevb stops it
+on `close`, on `stop`, on errors, and after 3 idle minutes, so you aren't
+billed for a forgotten session.
+
+jevb needs AWS credentials allowed to use Device Farm
+(`AWSDeviceFarmFullAccess` is enough). It takes the first of:
+
+1. **`JEVB_AWS_PROFILE=<name>`**, a profile from `~/.aws`.
+2. **A profile named `jevb`** in `~/.aws/credentials`, used automatically. A
+   Device-Farm-only key there stays out of everything else (commands under
+   *Device Farm setup* below).
+3. **The standard AWS chain:** `AWS_PROFILE`, or `AWS_ACCESS_KEY_ID` and
+   `AWS_SECRET_ACCESS_KEY` (plus `AWS_SESSION_TOKEN` for temporary
+   credentials) in the environment or in `./.env`, or `aws login`.
+
+A profile always wins over keys: with a `jevb` profile or `AWS_PROFILE` set,
+keys in the environment or `.env` are ignored.
+
+### Simulators, emulators and USB phones with Appium
+
+Free and local. Install [Appium](https://appium.io) with the driver for each
+platform, start it, and point jevb at it:
+
+```bash
+npm install -g appium
+appium driver install xcuitest       # iOS simulators and USB iPhones (needs Xcode)
+appium driver install uiautomator2   # Android emulators and USB phones (needs the Android SDK)
+appium                               # listens on http://127.0.0.1:4723
+
+export JEVB_APPIUM_URL=http://127.0.0.1:4723
+jevb open https://example.com --device "iPhone 16"                      # Safari in a booted simulator
+jevb open --device "iPhone 16" --app build/MyApp.app                    # a simulator build
+jevb open --device "emulator" --platform android --app app-debug.apk    # a running emulator
+```
+
+- `--device` is the simulator or device name. Set `JEVB_APPIUM_UDID` to pick
+  one exactly (`xcrun simctl list devices booted`, `adb devices`).
+- `--app` takes a local `.app` (simulator build), `.ipa` or `.apk`, or the
+  bundle id / package name of an installed app. A name that doesn't say
+  iPhone or iPad needs `--platform`.
+- The first iOS session builds WebDriverAgent, which can take several
+  minutes. Later sessions reuse it.
+- USB iPhones need WebDriverAgent signed with your Apple team; see the
+  Appium XCUITest driver docs.
+- Simulators are slower than Device Farm phones: 7–17s per tap on an iPhone
+  16 simulator, against 0.5–1.5s on Device Farm.
+
+### Controls with no name: Claude fallbacks
+
+Native apps often have icon buttons with no accessible name, which reach
+Jev as a bare "Button". With `ANTHROPIC_API_KEY` set (in the environment or
+`./.env`), jevb escalates in two steps, only when Jev finds no confident
+match:
+
+1. **Claude Haiku names them.** jevb sends one screenshot with the unnamed
+   controls' boxes, and Haiku labels each one ("Open navigation menu"). Then
+   Jev is asked again. This costs about 2–3k tokens per screen and is cached
+   by layout. In testing, Jev picked an app's unlabeled menu button at 0.99
+   once Haiku had named it, against no match before.
+2. **Claude Sonnet locates the control.** Some controls aren't in the
+   accessibility tree at all (Android doesn't expose a clickable `<div>` with
+   no role). As a last resort, Claude Sonnet uses computer use to say where
+   on the screenshot to tap, and jevb taps there (the pick reports `visual`).
+   It costs about 6k tokens (1–2 cents) and takes 1.5–4s, and it hit 4 of
+   5 test targets. Asking a model for "x,y" in plain text was off by 100px
+   or more.
+
+`JEVB_LABEL_MODEL` and `JEVB_LOCATE_MODEL` swap the models (defaults
+`claude-haiku-4-5` and `claude-sonnet-5`). An accessible name in your app is
+still the real fix, and makes jevb faster too.
 
 <details>
-<summary>Device Farm setup and phone details</summary>
+<summary>Device Farm setup and more phone details</summary>
 
 A Device-Farm-only IAM key in a profile named `jevb`:
 
@@ -254,9 +318,8 @@ aws iam create-access-key --user-name jevb --query 'AccessKey.[AccessKeyId,Secre
   keyboard can't autocapitalize them.
 - Device Farm records every session. The MP4 is under the session's artifacts
   once it finishes stopping.
-- Pick a different profile with `JEVB_AWS_PROFILE`, or a project with
-  `JEVB_DF_PROJECT_ARN`. By default jevb uses a project named `jevb`, created
-  on first use.
+- jevb uses a Device Farm project named `jevb`, created on first use, or
+  the one in `JEVB_DF_PROJECT_ARN`.
 
 </details>
 
@@ -272,21 +335,22 @@ from (see [.env.example](.env.example)). Shell variables win.
 | `JEVB_HEADED=1` · `JEVB_DEMO=1` · `JEVB_VIDEO=<dir>` | show the window · draw a cursor and a HUD of Jev's picks · record a `.webm` per session |
 | `JEVB_IDLE_MS` · `JEVB_DAEMON_IDLE_MS` · `JEVB_PORT` | browser idle close (2 min) · daemon exit (15 min) · daemon port (7788) |
 | `JEVB_CDP_URL` | attach to a running Chrome |
-| `AWS_*` · `JEVB_AWS_PROFILE` · `JEVB_DF_PROJECT_ARN` · `JEVB_DEVICE_IDLE_MS` | Device Farm |
+| `AWS_ACCESS_KEY_ID` · `AWS_SECRET_ACCESS_KEY` · `AWS_SESSION_TOKEN` · `JEVB_AWS_PROFILE` | Device Farm credentials (see *Phones and simulators*) |
+| `JEVB_DF_PROJECT_ARN` · `JEVB_DEVICE_IDLE_MS` | Device Farm project · release an idle phone (3 min) |
 | `JEVB_APPIUM_URL` · `JEVB_APPIUM_UDID` | local Appium |
-| `ANTHROPIC_API_KEY` · `JEVB_LABEL_MODEL` · `JEVB_LOCATE_MODEL` | naming unlabeled native controls |
+| `ANTHROPIC_API_KEY` · `JEVB_LABEL_MODEL` · `JEVB_LOCATE_MODEL` | Claude fallbacks for unnamed native controls (Haiku names, Sonnet locates) |
 | `JEV_MODEL` | Jev model (default `jev-latest`) |
 
 ## Cost and speed
 
-Measured in September 2026 against a production web app:
+Measured in September 2026:
 
 | | |
 |---|---|
 | Jev call | 140–310ms |
 | Chromium cold start | 220–400ms |
 | [`examples/todomvc.jevb`](examples/todomvc.jevb), 6 checks and 8 actions | ~8s at agent pace, ~14s at human pace, 11 Jev calls |
-| A 23-step tour of a production site | 17–18s agent, ~48s human |
+| A 23-step tour of [treechat.com](https://treechat.com) | 17–18s agent, ~48s human |
 | The same tour, an LLM agent driving the browser itself | 55–58s and ~$0.75–0.95 per run, vs ~$0.003 in Jev calls |
 | Real phone on Device Farm | ~60–70s to the first command, then 0.5–1.5s per step |
 

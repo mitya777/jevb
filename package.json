@@ -1,7 +1,7 @@
 {
   "name": "jevb",
   "version": "0.1.0",
-  "description": "Plain-English browser and phone tests: Jev (TypeSafe System One) picks elements and judges pages; drives headless Chromium on demand and real phones via AWS Device Farm or Appium. Human pace by default.",
+  "description": "Browser and phone use for AI agents, in plain English: a small decision model (Jev) picks elements, judges screens and reads text, so the agent never reads page snapshots. Headless Chromium, your own Chrome, iOS and Android (AWS Device Farm or Appium).",
   "license": "MIT",
   "author": "Dmitriy Fabrikant",
   "repository": {
@@ -9,16 +9,19 @@
     "url": "git+https://github.com/mitya777/jevb.git"
   },
   "keywords": [
-    "testing",
-    "e2e",
-    "playwright",
-    "chromium",
-    "appium",
-    "aws-device-farm",
     "agents",
     "ai",
-    "typesafe",
-    "jev"
+    "ai-agents",
+    "appium",
+    "aws-device-farm",
+    "browser-automation",
+    "browser-use",
+    "chromium",
+    "e2e",
+    "jev",
+    "playwright",
+    "testing",
+    "typesafe"
   ],
   "type": "module",
   "bin": {
@@ -47,5 +50,9 @@
     "@anthropic-ai/sdk": "^0.129.0",
     "@aws-sdk/client-device-farm": "^3.1141.0",
     "playwright-core": "1.57.0"
+  },
+  "homepage": "https://github.com/mitya777/jevb#readme",
+  "bugs": {
+    "url": "https://github.com/mitya777/jevb/issues"
   }
 }

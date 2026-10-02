@@ -40,6 +40,7 @@ test('ask: a 400 fails at once with the body; retries are bounded', async () => 
 })
 
 test('judge: pick and checks go as two parallel requests; the pick never sees page text', async () => {
+    jev.delay(300)
     const res = await run({
         intent: 'post the reply',
         options: opts('button "Post reply" at 10,10', 'a "Home" at 0,0'),
@@ -49,7 +50,8 @@ test('judge: pick and checks go as two parallel requests; the pick never sees pa
     const [pick] = jev.picks(), [checks] = jev.checks()
     assert.deepEqual(pick.state, { intent: 'post the reply', page: { url: 'http://x/', title: 'X' } })
     assert.deepEqual(Object.keys(checks.questions), ['check_0', 'check_1'])
-    assert.ok(Math.abs(pick.at - checks.at) < 50, 'requests were not concurrent')
+    // Each answer takes 300ms, so in sequence they'd arrive >=300ms apart.
+    assert.ok(Math.abs(pick.at - checks.at) < 300, 'requests were not concurrent')
     assert.equal(res.target.id, 'e1')
     assert.equal(pick.questions.target.criteria.none, 'No element on the page matches the intent')
     assert.deepEqual(res.checks.map((c) => [c.pass, c.threshold]), [[true, 0.7], [true, 0.3]])

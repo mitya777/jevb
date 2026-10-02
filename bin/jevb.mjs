@@ -34,6 +34,9 @@ const USAGE = `jevb <command> [args] [--pace human|agent] [--session NAME]
   refute <question...>             inverse check; exit 1 if >= --threshold (0.3)
   checks --check Q --refute Q ...  many checks in ONE Jev request; exit 1 if any fail
   act/type ... --check Q --refute Q  ride checks along with the element choice
+  read [question...] [--full]      no question: the on-screen text and fields checks see (no Jev call);
+                                   a question: the on-screen text that answers it, verbatim (1 Jev call);
+                                   --full: the whole page's text
   snap                             list interactive elements Jev chooses from
   shot <path> [--full]             screenshot
   pace [human|agent]               get/set the daemon default pace
@@ -133,6 +136,7 @@ async function main() {
     const text = pos.join(' ')
     const args = {
         status: {}, snap: common, close: common,
+        read: { ...common, question: text || undefined, full: !!flags.full },
         open: { ...common, url: pos[0], device: flags.device, app: flags.app, platform: flags.platform, attach: !!flags.attach },
         eval: { ...common, script: (rest || pos).join(' ') },
         devices: { platform: flags.platform },

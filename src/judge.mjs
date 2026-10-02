@@ -105,3 +105,35 @@ export async function judge({ intent, checks = [], options, state, where }) {
     }), { input: 0, output: 0 })
     return { target, checks: checkResults, requests, summary, usage }
 }
+
+// `jevb read <question>`: extraction as a choice, not generation. The
+// visible text comes as blocks (each with the item it sits in), Jev picks
+// the block that answers the question, and the answer is that block's text
+// verbatim, so it can't be made up. Low confidence or "none" is NO_MATCH.
+export async function pickText({ question, blocks, where, minConfidence = 0.5 }) {
+    if (!blocks.length) throw Object.assign(new Error('no text on screen'), { code: 'NO_ELEMENTS' })
+    let list = blocks
+    if (list.length > 254) { // Jev's choice cap: keep the blocks sharing the most words
+        const want = new Set(question.toLowerCase().split(/\W+/).filter((w) => w.length > 2))
+        const score = (b) => `${b.text} ${b.context || ''}`.toLowerCase().split(/\W+/).filter((w) => want.has(w)).length
+        list = [...list].sort((a, b) => score(b) - score(a)).slice(0, 254)
+    }
+    const desc = (b) => `${b.kind || 'text'} "${b.text}"${b.context ? ` in "${b.context}"` : ''}`
+    const criteria = Object.fromEntries(list.map((b, i) => [`b${i + 1}`, desc(b)]))
+    criteria.none = 'No text on the screen answers the question'
+    const t = Date.now()
+    const res = await ask({ question, page: await where() }, {
+        // Measured (9 cases, real Jev): spelling out what an option is beat
+        // "choose the text that states the answer" 7/9 vs 6/9.
+        answer: { type: 'choice', criteria, instructions: "Each option is one piece of text shown on the screen: its kind, the text in quotes, and the text around it. Which option's quoted text is the answer to `question`?" },
+    })
+    const a = res.answers.answer
+    const top = Object.entries(a.probabilities || {}).sort((x, y) => y[1] - x[1]).slice(0, 3)
+        .filter(([, p], i) => i === 0 || p >= 0.01).map(([id, p]) => ({ p: +p.toFixed(3), text: criteria[id] }))
+    const usage = { input: res.usage?.input_tokens || 0, output: res.usage?.output_tokens || 0 }
+    const picked = a.choice !== 'none' && list[Number(a.choice.slice(1)) - 1]
+    if (!picked || a.confidence < minConfidence) {
+        throw Object.assign(new Error(`no confident answer for "${question}"`), { code: 'NO_MATCH', detail: { confidence: a.confidence, top }, usage })
+    }
+    return { answer: picked.text, ...(picked.kind && picked.kind !== 'text' && { kind: picked.kind }), ...(picked.context && { in: picked.context }), confidence: a.confidence, jevMs: Date.now() - t, top, usage }
+}

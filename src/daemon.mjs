@@ -22,6 +22,7 @@ const ACTIONS = {
     check: (b, a) => b.check(a.question, a),
     checks: (b, a) => b.checks(a.checks || [], a),
     snap: (b, a) => b.snap(a),
+    read: (b, a) => b.readText(a),
     shot: (b, a) => b.screenshot(a.path, a),
     close: (b, a) => b.close(a),
     pace: (b, a, d) => { if (a.pace) b.pace = d.pace = a.pace; return { pace: b.pace } },

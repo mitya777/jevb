@@ -10,6 +10,7 @@
 //   check@0.9 does the reply show an avatar?   # custom threshold
 //   refute is an error message shown?           # passes if noul < 0.3
 //   shot out/after-post.png
+//   read what is the order number?   # the on-screen text that answers, verbatim
 //
 // Real phones (AWS Device Farm, or JEVB_APPIUM_URL): `device` / `app` lines
 // pick what the next `open` starts; `open` with no url launches the app.
@@ -126,6 +127,7 @@ export async function runScenario(file, { pace, baseUrl, batch = true, onStep = 
                         out = await b.type(intent, expand(text ?? ''), { checks })
                         break
                     }
+                    case 'read': out = await b.readText({ question: s.arg || undefined }); break
                     case 'press': out = await b.press(s.arg); break
                     case 'scroll': out = await b.scroll(s.arg || 600); break
                     case 'wait': await new Promise((r) => setTimeout(r, Number(s.arg))); out = {}; break

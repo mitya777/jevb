@@ -30,7 +30,9 @@ URL="http://127.0.0.1:$PORT"
 PROFILE_ARGS=()
 if [[ -n "${JEVB_CHROME_PROFILE_DIR:-}" ]]; then PROFILE_ARGS=(--profile-directory="$JEVB_CHROME_PROFILE_DIR"); fi
 
-if [[ -z "${CHROME:-}" ]]; then
+# Any Chromium-based browser works, e.g. JEVB_CHROME=/Applications/Helium.app/Contents/MacOS/Helium
+CHROME="${CHROME:-${JEVB_CHROME:-}}"
+if [[ -z "$CHROME" ]]; then
     for c in "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
              "$(command -v google-chrome || true)" "$(command -v google-chrome-stable || true)"; do
         [[ -n "$c" && -x "$c" ]] && CHROME="$c" && break

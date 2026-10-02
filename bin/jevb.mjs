@@ -24,6 +24,8 @@ const USAGE = `jevb <command> [args] [--pace human|agent] [--session NAME]
   devices [--platform ios|android] Device Farm phones you can open
   act <intent...>                  Jev picks the element, then click it
   type <intent...> -- <text...>    Jev picks the field, then type text [--enter]
+  upload <intent...> -- <file...>  Jev picks the file input / upload button, then
+                                   gives it the files (no OS dialog)
   press <key>                      e.g. Enter, Escape, Meta+K; on iOS also
                                    Screenshot, ScreenshotEditor
   launch <bundle id|package>       bring another app on the phone to the front
@@ -143,6 +145,7 @@ async function main() {
         act: { ...common, intent: text },
         type: { ...common, intent: text, text: (rest || []).join(' '), submit: !!flags.enter },
         press: { ...common, key: pos[0] },
+        upload: { ...common, intent: text, files: (rest || []).map((f) => path.resolve(f)) },
         launch: { ...common, app: pos[0] },
         scroll: { ...common, dy: pos[0] },
         check: { ...common, question: text, threshold: flags.threshold },
@@ -153,6 +156,10 @@ async function main() {
     }[cmd]
     if (!args) { console.error(USAGE); process.exitCode = 2; return }
 
+    if (cmd === 'upload') {
+        const missing = args.files.filter((f) => !fs.existsSync(f))
+        if (missing.length) { print({ error: `no such file: ${missing.join(', ')}` }); process.exitCode = 1; return }
+    }
     await ensureDaemon()
     const { ok, body } = await call(cmd === 'refute' ? 'check' : cmd, args)
     print(body)

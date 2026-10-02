@@ -1,0 +1,17 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Upload</title>
+<!-- Upload controls as apps build them: a button in front of a hidden input,
+     a plain visible input, and a drop zone with no click handler. -->
+<button id="pick">Select video</button>
+<input type="file" id="hidden" accept="video/*" style="display:none">
+<p><label>Cover image <input type="file" id="cover"></label></p>
+<div id="drop" style="cursor:pointer;border:2px dashed #888;padding:20px">Drag and drop files here</div>
+<p id="out"></p>
+<script>
+const show = (what, input) => { document.getElementById('out').textContent = `${what}: ${[...input.files].map((f) => `${f.name} (${f.size})`).join(', ')}` }
+document.getElementById('pick').onclick = () => document.getElementById('hidden').click()
+document.getElementById('hidden').onchange = (e) => show('Video', e.target)
+document.getElementById('cover').onchange = (e) => show('Cover', e.target)
+document.getElementById('drop').addEventListener('click', () => {}) // no chooser
+</script>

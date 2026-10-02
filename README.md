@@ -189,6 +189,7 @@ Top tabs shown?" scores about 0.8.
 | `open <url>` | navigate; starts the daemon and browser on demand |
 | `act <intent>` | pick and click; `--check Q` / `--refute Q` ride along |
 | `type <intent> -- <text>` | pick a field and type; `--enter` submits |
+| `upload <intent> -- <file…>` | pick a file input or upload button and give it files; no OS dialog (browser sessions) |
 | `check` / `refute <question>` | assert; `--threshold` |
 | `checks --check Q --refute Q …` | many checks in one Jev request |
 | `press <key>` · `scroll [dy\|end\|top]` | |

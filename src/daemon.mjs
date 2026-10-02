@@ -16,6 +16,7 @@ const ACTIONS = {
     act: (b, a) => b.act(a.intent, a),
     type: (b, a) => b.type(a.intent, a.text, a),
     press: (b, a) => b.press(a.key, a),
+    upload: (b, a) => { if (!b.upload) throw new Error('upload needs a browser session'); return b.upload(a.intent, a.files, a) },
     eval: (b, a) => b.evaluate(a.script, a),
     launch: (b, a) => { if (!b.launch) throw new Error('launch needs a device session'); return b.launch(a.app, a) },
     scroll: (b, a) => b.scroll(a.dy, a),

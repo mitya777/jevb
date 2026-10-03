@@ -57,6 +57,21 @@ export function collect() {
     // row, "Hot" pill), not the whole pointer-styled toolbar around it.
     const pointer = (el) => el && getComputedStyle(el).cursor === 'pointer'
     const text = (el) => clean(el.innerText)
+    // Not something a person can see or hit. Custom-styled checkboxes and
+    // radios are real inputs at opacity 0 under a painted label (TodoMVC,
+    // most UI kits); they're still what gets clicked. Anything else at
+    // opacity 0 is hidden.
+    const unseen = (el) => {
+        const r = el.getBoundingClientRect()
+        if (r.width < 2 || r.height < 2) return true
+        const cs = getComputedStyle(el)
+        if (cs.visibility === 'hidden' || cs.display === 'none') return true
+        return Number(cs.opacity) === 0 && !el.matches('input[type=checkbox],input[type=radio],input[type=file],input[type=range]')
+    }
+    // Custom selects (react-select and kin) render an icon or value in a
+    // pointer div and keep their only focusable part, a 1px transparent
+    // input, inside it. That input carries the name; the div is the target.
+    const hiddenInputLabel = (el) => [...el.querySelectorAll('input[aria-label]')].find(unseen)?.getAttribute('aria-label') || ''
     const candidates = new Set(document.querySelectorAll(SELECTOR))
     for (const leaf of document.querySelectorAll('body *')) {
         if (!pointer(leaf) || [...leaf.children].some(pointer)) continue
@@ -64,18 +79,13 @@ export function collect() {
         let el = leaf
         while (pointer(el.parentElement) && text(el.parentElement) === text(el) && !el.parentElement.matches(CONTROL)) el = el.parentElement
         if (!text(el) && !el.querySelector('svg,img')) continue
-        if ([...el.querySelectorAll(CONTROL)].some((c) => text(c) === text(el))) continue
+        // A control inside it that people can't see doesn't stand in for it.
+        if ([...el.querySelectorAll(CONTROL)].some((c) => text(c) === text(el) && !unseen(c))) continue
         candidates.add(el)
     }
     for (const el of candidates) {
+        if (unseen(el)) continue
         const r = el.getBoundingClientRect()
-        if (r.width < 2 || r.height < 2) continue
-        const cs = getComputedStyle(el)
-        if (cs.visibility === 'hidden' || cs.display === 'none') continue
-        // Custom-styled checkboxes and radios are real inputs at opacity 0
-        // under a painted label (TodoMVC, most UI kits); they're still what
-        // gets clicked. Anything else at opacity 0 is hidden.
-        if (Number(cs.opacity) === 0 && !el.matches('input[type=checkbox],input[type=radio],input[type=file],input[type=range]')) continue
         if (el.closest('[aria-hidden=true],[inert]')) continue
         // Skip wrappers whose only job is to contain an already-listed control.
         if (el.matches('[tabindex]') && !el.matches('a,button,input,textarea,select,[role],[contenteditable]')
@@ -88,6 +98,7 @@ export function collect() {
             el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('placeholder')
             || el.getAttribute('alt') || el.labels?.[0]?.innerText || nearbyLabel(el) || el.innerText || el.value
             || el.getAttribute('name') || el.getAttribute('autocomplete') || el.getAttribute('type')
+            || hiddenInputLabel(el)
             || [...el.querySelectorAll('img[alt],svg title')].map((x) => x.getAttribute('alt') || x.textContent).join(' ')
             || iconHint(el),
         ).slice(0, 100)

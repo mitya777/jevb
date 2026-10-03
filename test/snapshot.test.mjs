@@ -29,6 +29,9 @@ test('snapshot: one option per real control, named the way a person would', asyn
         'button "Disabled button" disabled',
         'button "Inside panel"', // its tabindex=0 panel root is not an option
         'a "Far link" href=/far offscreen',
+        // Pointer-only clickables follow the selector matches. This one is a
+        // react-select: the visible pointer div, named by its hidden 1px input.
+        'clickable "AI Actions"',
     ])
     // Not offered: display:none, visibility:hidden, aria-hidden, covered by the fixed banner.
 })

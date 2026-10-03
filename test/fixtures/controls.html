@@ -16,6 +16,9 @@
 <!-- Field labelled by a sibling div instead of <label for>. -->
 <div><div>Display name</div><div><input id="dn"></div></div>
 <label>Password <input type="password" value="hunter2"></label>
+<!-- Icon-only custom select (react-select): a pointer div whose only focusable
+     part is a 1px transparent input carrying the aria-label. -->
+<div class="row" style="width:30px;height:30px"><div><svg class="lucide lucide-palette" width="20" height="20"><rect width="20" height="20"/></svg><input readonly tabindex="0" aria-label="AI Actions" style="width:1px;opacity:0;transform:scale(0);border:0;padding:0"></div></div>
 <!-- Custom-styled checkbox: the real input sits at opacity 0 under a painted label. -->
 <label><input type="checkbox" style="opacity:0"> Subscribe to digest</label>
 <!-- Invisible or inert: never offered. -->

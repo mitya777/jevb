@@ -408,6 +408,13 @@ Measured in September 2026:
 | The same tour, an LLM agent driving the browser itself | 55–58s and ~$0.75–0.95 per run, vs ~$0.003 in Jev calls |
 | Real phone on Device Farm | ~60–70s to the first command, then 0.5–1.5s per step |
 
+In daily use: this card comes from the author's own Claude Code sessions and
+is rebuilt every 15 minutes. It counts the browser work Claude ran through
+jevb instead of Claude Code's built-in browser pane, at Anthropic API list
+prices. The [full page](https://mitya777.github.io/jevb/) explains the method.
+
+<a href="https://mitya777.github.io/jevb/"><picture><source media="(prefers-color-scheme: dark)" srcset="https://mitya777.github.io/jevb/savings-dark.svg"><img alt="What jevb has saved Claude Code, updated every 15 minutes" src="https://mitya777.github.io/jevb/savings-light.svg" width="720"></picture></a>
+
 ## Status
 
 Experimental and in active use. Things to know:

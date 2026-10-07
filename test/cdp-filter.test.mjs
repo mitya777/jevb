@@ -60,34 +60,41 @@ test('popups from jevb\'s tab and browser sessions pass through', () => {
 
 // Real Chrome with a tab stuck in an infinite loop: Playwright's own
 // connectOverCDP waits on it forever; jevb's attach must not. Playwright's
-// headless shell, since that's the browser CI installs.
-async function chromeWithHungTab() {
+// headless shell, since that's the browser CI installs. Each resource is
+// cleaned up by t.after as soon as it exists: a server left open by a
+// failed setup keeps the file's process alive and hangs `node --test`.
+async function chromeWithHungTab(t) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'jevb-cdp-'))
     const exe = registry.findExecutable('chromium-headless-shell').executablePath()
-    const chrome = spawn(exe, ['--remote-debugging-port=0', `--user-data-dir=${dir}`, 'about:blank'], { stdio: 'ignore' })
-    const close = async () => {
-        if (chrome.exitCode === null) await new Promise((r) => { chrome.once('exit', r); chrome.kill() })
+    // --no-sandbox as Playwright passes it; CI's Ubuntu blocks Chrome's sandbox.
+    const chrome = spawn(exe, ['--no-sandbox', '--remote-debugging-port=0', `--user-data-dir=${dir}`, 'about:blank'], { stdio: 'ignore' })
+    t.after(async () => {
+        if (chrome.exitCode === null && chrome.signalCode === null) {
+            const exit = new Promise((r) => chrome.once('exit', r))
+            chrome.kill()
+            const late = setTimeout(() => chrome.kill('SIGKILL'), 3_000)
+            await exit; clearTimeout(late)
+        }
         fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5 })
-    }
-    const exited = new Promise((_, reject) => chrome.once('error', reject))
-    try {
-        const portFile = path.join(dir, 'DevToolsActivePort')
-        for (let i = 0; i < 100 && !fs.existsSync(portFile); i++) await Promise.race([exited, new Promise((r) => setTimeout(r, 100))])
-        const cdpUrl = `http://127.0.0.1:${fs.readFileSync(portFile, 'utf8').split('\n')[0]}`
-        await fetch(`${cdpUrl}/json/new?${encodeURIComponent('data:text/html,<script>setTimeout(()=>{for(;;){}},0)</script>')}`, { method: 'PUT' })
-        await new Promise((r) => setTimeout(r, 500))
-        return { cdpUrl, close }
-    } catch (e) { await close(); throw e }
+    })
+    const failed = new Promise((_, reject) => {
+        chrome.once('error', reject)
+        chrome.once('exit', (code) => reject(new Error(`chrome exited (${code}) before DevTools came up`)))
+    })
+    const portFile = path.join(dir, 'DevToolsActivePort')
+    for (let i = 0; i < 100 && !fs.existsSync(portFile); i++) await Promise.race([failed, new Promise((r) => setTimeout(r, 100))])
+    const cdpUrl = `http://127.0.0.1:${fs.readFileSync(portFile, 'utf8').split('\n')[0]}`
+    const hung = 'data:text/html,<script>setTimeout(()=>{for(;;){}},0)</script>'
+    await fetch(`${cdpUrl}/json/new?${encodeURIComponent(hung)}`, { method: 'PUT', signal: AbortSignal.timeout(5_000) })
+    await new Promise((r) => setTimeout(r, 500))
+    return cdpUrl
 }
 
-test('a hung tab in the attached browser doesn\'t block jevb', { timeout: 30_000 }, async () => {
-    const jev = await fakeJev(), site = await fixtures(), chrome = await chromeWithHungTab()
-    const b = new JevBrowser({ pace: 'agent', cdpUrl: chrome.cdpUrl })
-    try {
-        const res = await b.open(site.url('next.html'))
-        assert.equal(res.status, 200)
-    } finally {
-        await b.shutdown('stop', { closeTabs: true })
-        await chrome.close(); await jev.close(); await site.close()
-    }
+test('a hung tab in the attached browser doesn\'t block jevb', { timeout: 30_000 }, async (t) => {
+    const jev = await fakeJev(); t.after(() => jev.close())
+    const site = await fixtures(); t.after(() => site.close())
+    const b = new JevBrowser({ pace: 'agent', cdpUrl: await chromeWithHungTab(t) })
+    t.after(() => b.shutdown('stop', { closeTabs: true }))
+    const res = await b.open(site.url('next.html'))
+    assert.equal(res.status, 200)
 })

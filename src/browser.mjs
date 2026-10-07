@@ -2,6 +2,7 @@
 // a page; after `idleMs` with no actions the browser is closed and relaunched
 // (fresh) on the next one. Sessions are named browser contexts.
 import { chromium } from 'playwright-core'
+import { startCdpFilter } from './cdp-filter.mjs'
 import { OVERLAY } from './demo.mjs'
 import { judge, pickText, waitForChecks, waitUntil } from './judge.mjs'
 import * as pace from './pace.mjs'
@@ -42,8 +43,10 @@ export class JevBrowser {
         this.launching ||= (async () => {
             const t = Date.now()
             // Prefer the slim headless shell Playwright installs; no Chrome window.
+            // Attached: through a proxy that hides the user's own tabs, so a
+            // hung one can't stall the attach (see cdp-filter.mjs).
             const b = this.cdpUrl
-                ? await chromium.connectOverCDP(this.cdpUrl)
+                ? await chromium.connectOverCDP(await startCdpFilter(this.cdpUrl, { log: this.log }))
                 : await chromium.launch({ headless: this.headless })
             b.on('disconnected', () => { this.browser = null; this.sessions.clear(); this.overlayAdded = false })
             this.log(`${this.cdpUrl ? `attached to ${this.cdpUrl}` : 'chromium up'} in ${Date.now() - t}ms`)

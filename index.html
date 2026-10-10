@@ -1,0 +1,429 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="description" content="Claude's browser work through jevb has saved $22.55 at API prices (276 round trips avoided), measured from Claude Code transcripts."><meta property="og:title" content="jevb Savings"><meta property="og:description" content="Claude's browser work through jevb has saved $22.55 at API prices (276 round trips avoided), measured from Claude Code transcripts."><style>:root{color-scheme:light}body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style>
+<title>jevb Savings</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: one 1040px column. Status line, four figures, two charts, the per-tool table, the live call feed, then the method. */
+:root {
+  --bg: #f3f5f8;
+  --surface: #ffffff;
+  --ink: #12161c;
+  --ink-2: #4a5260;
+  --ink-3: #7a8291;
+  --rule: #dfe3ea;
+  --grid: #eceff3;
+  --s-jevb: #2a78d6;
+  --s-pane: #eb6834;
+  --s-chrome: #1baf7a;
+  --good: #137a3a;
+  --bad: #b3261e;
+  --live: #1baf7a;
+  --font-display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", sans-serif;
+  --font-body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1216; --surface: #171b21; --ink: #eef1f5; --ink-2: #b4bbc7; --ink-3: #848c9a;
+    --rule: #2a303a; --grid: #222831; --s-jevb: #3987e5; --s-pane: #d95926; --s-chrome: #199e70;
+    --good: #5cc78a; --bad: #ff8a80; --live: #34c88f; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1216; --surface: #171b21; --ink: #eef1f5; --ink-2: #b4bbc7; --ink-3: #848c9a;
+  --rule: #2a303a; --grid: #222831; --s-jevb: #3987e5; --s-pane: #d95926; --s-chrome: #199e70;
+  --good: #5cc78a; --bad: #ff8a80; --live: #34c88f; color-scheme: dark;
+}
+body { background: var(--bg); color: var(--ink); font: 15px/1.55 var(--font-body); }
+.page { max-width: 1040px; margin: 0 auto; padding-inline: 20px; padding-block: 36px 64px; display: grid; gap: 40px; }
+h1, h2 { font-family: var(--font-display); font-weight: 700; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(34px, 6vw, 52px); line-height: 1.02; letter-spacing: -0.02em; }
+h2 { font-size: 21px; letter-spacing: -0.01em; }
+p { margin: 0; }
+.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.eyebrow { font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+
+header { display: grid; gap: 14px; }
+.lede { max-width: 64ch; color: var(--ink-2); font-size: 16px; }
+.lede a { color: var(--s-jevb); text-underline-offset: 2px; }
+.status { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; font-size: 13px; color: var(--ink-2); }
+.live { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px 4px 8px; border: 1px solid var(--rule); border-radius: 999px; background: var(--surface); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--live); box-shadow: 0 0 0 0 var(--live); animation: pulse 2.4s ease-out infinite; }
+.live.stale .dot { background: var(--ink-3); animation: none; }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--live) 55%, transparent); } 100% { box-shadow: 0 0 0 9px transparent; } }
+@media (prefers-reduced-motion: reduce) { .dot { animation: none; } }
+
+.figures { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; }
+.fig { background: var(--surface); padding: 18px 18px 16px; display: grid; gap: 4px; align-content: start; min-width: 0; }
+.fig .label { font-size: 13px; color: var(--ink-2); }
+.fig .value { font-family: var(--font-display); font-weight: 700; font-size: clamp(28px, 4.2vw, 38px); line-height: 1.1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.fig .sub { font-size: 12.5px; color: var(--ink-3); }
+.fig.hero .value { color: var(--s-jevb); }
+@media (max-width: 760px) { .figures { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+section { display: grid; gap: 14px; min-width: 0; }
+.section-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 6px 16px; }
+.section-head p { color: var(--ink-3); font-size: 13px; }
+.panel { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 18px 16px 12px; min-width: 0; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--ink-2); margin-bottom: 8px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.sw.jevb { background: var(--s-jevb); } .sw.pane { background: var(--s-pane); } .sw.chrome { background: var(--s-chrome); }
+.chart { position: relative; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart text { font-family: var(--font-mono); font-size: 11px; fill: var(--ink-3); }
+.chart .gridline { stroke: var(--grid); stroke-width: 1; }
+.chart .axis { stroke: var(--rule); stroke-width: 1; }
+.chart .marker { stroke: var(--ink-2); stroke-width: 1; stroke-dasharray: 3 3; }
+.chart .marker-label { fill: var(--ink-2); font-family: var(--font-body); font-size: 11.5px; font-weight: 600; }
+.chart .hit { fill: transparent; cursor: default; }
+.chart .hit:hover + .hover-band, .chart .band-on { fill: color-mix(in srgb, var(--ink) 5%, transparent); }
+.tip { position: absolute; pointer-events: none; z-index: 2; min-width: 170px; background: var(--surface); color: var(--ink); border: 1px solid var(--rule); border-radius: 8px; padding: 8px 10px; font-size: 12.5px; box-shadow: 0 6px 20px rgb(0 0 0 / 0.12); display: grid; gap: 3px; }
+.tip[hidden] { display: none; }
+.tip b { font-weight: 600; }
+.tip .row { display: flex; justify-content: space-between; gap: 14px; align-items: center; }
+.tip .row span:first-child { display: inline-flex; gap: 6px; align-items: center; color: var(--ink-2); }
+
+.split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+@media (max-width: 860px) { .split { grid-template-columns: minmax(0, 1fr); } }
+
+.table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { text-align: left; padding: 9px 14px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+th { font-size: 12px; font-weight: 600; color: var(--ink-3); letter-spacing: 0.03em; }
+td.r, th.r { text-align: right; }
+tr:last-child td { border-bottom: 0; }
+td .num { font-size: 13px; }
+.tool { display: inline-flex; align-items: center; gap: 7px; font-weight: 500; }
+.what { color: var(--ink-2); white-space: normal; min-width: 14ch; }
+.pos { color: var(--good); } .neg { color: var(--bad); } .zero { color: var(--ink-3); }
+.when { color: var(--ink-3); }
+
+.method { display: grid; gap: 10px; max-width: 72ch; color: var(--ink-2); font-size: 14px; }
+.method ul { margin: 0; padding-left: 18px; display: grid; gap: 7px; }
+.method code { font-family: var(--font-mono); font-size: 12.5px; background: var(--grid); padding: 1px 5px; border-radius: 4px; }
+details { color: var(--ink-2); font-size: 14px; }
+summary { cursor: pointer; font-weight: 600; color: var(--ink); padding: 4px 0; }
+summary:focus-visible, a:focus-visible { outline: 2px solid var(--s-jevb); outline-offset: 2px; border-radius: 4px; }
+details .table-wrap { margin-top: 10px; }
+.empty { color: var(--ink-3); padding: 24px 4px; }
+</style>
+
+</head><body>
+<main class="page">
+  <header>
+    <span class="eyebrow">Claude Code · browser tool calls</span>
+    <h1>jevb Savings</h1>
+    <p class="lede">What it saves when Claude runs browser work through the <a href="https://github.com/mitya777/jevb">jevb CLI</a> instead of the built-in browser pane. Measured from Claude Code session transcripts and priced at Anthropic API list prices. On a Max plan this is plan usage, not billed dollars.</p>
+    <div class="status">
+      <span class="live" id="live"><span class="dot" aria-hidden="true"></span><span id="updated">Loading…</span></span>
+      <span id="span"></span>
+    </div>
+  </header>
+
+  <div class="figures" id="figures"></div>
+
+  <div class="split">
+    <section>
+      <div class="section-head"><h2>Browser calls per day</h2><p id="calls-span">Since jevb's first use</p></div>
+      <div class="panel">
+        <div class="legend"><span><i class="sw jevb"></i>jevb</span><span><i class="sw pane"></i>Built-in pane</span><span><i class="sw chrome"></i>Claude in Chrome</span></div>
+        <div class="chart" id="calls-chart"></div>
+      </div>
+    </section>
+    <section>
+      <div class="section-head"><h2>Total saved</h2><p>Running total, API prices</p></div>
+      <div class="panel">
+        <div class="legend"><span><i class="sw jevb"></i>Net saved by jevb</span></div>
+        <div class="chart" id="saved-chart"></div>
+      </div>
+    </section>
+  </div>
+
+  <section>
+    <div class="section-head"><h2>Each tool, all time</h2><p id="tool-span"></p></div>
+    <div class="table-wrap"><table id="tools"></table></div>
+  </section>
+
+  <section>
+    <div class="section-head"><h2>Latest browser calls</h2><p>Newest first · one row per tool call</p></div>
+    <div class="table-wrap"><table id="feed"></table></div>
+  </section>
+
+  <section class="method">
+    <h2>How it's measured</h2>
+    <ul id="method"></ul>
+    <details>
+      <summary>Daily numbers as a table</summary>
+      <div class="table-wrap"><table id="daily"></table></div>
+    </details>
+  </section>
+</main>
+
+<script type="application/json" id="savings-data">{"generatedAt":"2026-10-10T21:37:01+00:00","ruleAt":"2026-10-03T03:40:53Z","jevUsd":0.0002,"paneStepsPerCall":1.403,"plan":{"name":"Max 20x","monthlyUsd":200,"usdPerWeeklyPercent":31.71,"calibration":"38% of the weekly limit was $1,205 of API-priced Claude Code usage (Sep 27 to Oct 3, 2026)"},"firstDay":"2026-07-02","totals":{"all":{"pane":{"calls":6875,"steps":9648,"cost":1373.57998,"added":7549835.50952},"chrome":{"calls":1348,"steps":3827,"cost":204.49477,"added":3681961.63333},"jevb":{"calls":963,"steps":1654,"cost":67.54952,"added":1380611.0},"saved":22.8244,"avoided":276.36158,"tokensAvoided":92408385.67434,"jev":1354,"jevCost":0.2708},"sinceRule":{"pane":{"calls":224,"steps":244,"cost":10.66585,"added":134480.0},"chrome":{"calls":2,"steps":2,"cost":0.04788,"added":552.0},"jevb":{"calls":661,"steps":1176,"cost":48.97597,"added":993038.5},"saved":18.88751,"avoided":218.44761,"tokensAvoided":76452302.14091,"jev":986,"jevCost":0.1972},"last7":{"pane":{"calls":120,"steps":125,"cost":6.10942,"added":65194.5},"chrome":{"calls":2,"steps":2,"cost":0.04788,"added":552.0},"jevb":{"calls":514,"steps":869,"cost":38.866,"added":772057.5},"saved":12.96528,"avoided":143.66081,"tokensAvoided":52990246.70714,"jev":760,"jevCost":0.152}},"days":[{"day":"2026-07-02","pane":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"chrome":{"calls":36,"steps":36,"cost":1.9435,"added":37212.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-07-10","pane":{"calls":15,"steps":15,"cost":1.73648,"added":23265.5},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-07-11","pane":{"calls":16,"steps":16,"cost":3.31603,"added":25696.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-07-12","pane":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"chrome":{"calls":56,"steps":152,"cost":10.85284,"added":122970.5},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-07-13","pane":{"calls":19,"steps":19,"cost":2.5198,"added":32385.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-07-14","pane":{"calls":166,"steps":166,"cost":51.65858,"added":117963.5},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-07-16","pane":{"calls":99,"steps":99,"cost":28.89464,"added":59851.5},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-07-17","pane":{"calls":2,"steps":2,"cost":0.53767,"added":3147.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-07-19","pane":{"calls":13,"steps":13,"cost":3.1172,"added":6830.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-07-20","pane":{"calls":50,"steps":50,"cost":9.26498,"added":51329.0},"chrome":{"calls":13,"steps":13,"cost":2.01122,"added":9716.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-07-21","pane":{"calls":121,"steps":121,"cost":36.35201,"added":114919.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-07-22","pane":{"calls":350,"steps":350,"cost":78.4082,"added":322784.5},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-07-23","pane":{"calls":239,"steps":239,"cost":49.38991,"added":389734.5},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-07-24","pane":{"calls":3,"steps":3,"cost":0.6385,"added":2596.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-07-25","pane":{"calls":53,"steps":53,"cost":17.1286,"added":38021.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-07-27","pane":{"calls":17,"steps":17,"cost":4.34506,"added":6411.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-07-28","pane":{"calls":27,"steps":27,"cost":3.21233,"added":8311.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-07-29","pane":{"calls":147,"steps":147,"cost":53.59899,"added":132155.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-07-30","pane":{"calls":23,"steps":23,"cost":3.34804,"added":8547.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-07-31","pane":{"calls":2,"steps":2,"cost":0.53717,"added":485.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-08-01","pane":{"calls":7,"steps":7,"cost":1.18514,"added":1486.0},"chrome":{"calls":17,"steps":17,"cost":1.87424,"added":6086.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-08-02","pane":{"calls":33,"steps":33,"cost":6.84037,"added":26753.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-08-03","pane":{"calls":54,"steps":54,"cost":7.66188,"added":97836.0},"chrome":{"calls":11,"steps":11,"cost":1.24319,"added":3425.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-08-04","pane":{"calls":179,"steps":179,"cost":54.34399,"added":364971.5},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-08-05","pane":{"calls":34,"steps":34,"cost":9.31289,"added":28543.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-08-07","pane":{"calls":143,"steps":143,"cost":42.13663,"added":132064.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-08-08","pane":{"calls":100,"steps":100,"cost":39.247,"added":94918.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-08-09","pane":{"calls":396,"steps":396,"cost":120.00736,"added":363238.66667},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-08-10","pane":{"calls":117,"steps":117,"cost":28.3815,"added":117006.5},"chrome":{"calls":20,"steps":20,"cost":1.12695,"added":35393.5},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-08-11","pane":{"calls":310,"steps":310,"cost":76.96507,"added":246691.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-08-12","pane":{"calls":219,"steps":219,"cost":42.00166,"added":192490.66667},"chrome":{"calls":46,"steps":46,"cost":5.45163,"added":32767.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-08-13","pane":{"calls":107,"steps":107,"cost":15.54648,"added":225462.5},"chrome":{"calls":9,"steps":9,"cost":0.57332,"added":6085.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-08-14","pane":{"calls":95,"steps":95,"cost":9.49482,"added":77523.5},"chrome":{"calls":2,"steps":2,"cost":0.09768,"added":548.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-08-15","pane":{"calls":87,"steps":87,"cost":13.92192,"added":60737.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-08-16","pane":{"calls":31,"steps":31,"cost":6.34545,"added":22729.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-08-17","pane":{"calls":22,"steps":22,"cost":4.97442,"added":12581.5},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-08-18","pane":{"calls":72,"steps":72,"cost":22.08335,"added":49786.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-08-19","pane":{"calls":29,"steps":29,"cost":6.00499,"added":26686.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-08-20","pane":{"calls":55,"steps":55,"cost":33.124,"added":470899.5},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-08-21","pane":{"calls":93,"steps":93,"cost":21.72203,"added":68469.5},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-08-22","pane":{"calls":9,"steps":9,"cost":5.06148,"added":3533.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-08-23","pane":{"calls":76,"steps":76,"cost":11.29697,"added":32453.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-08-24","pane":{"calls":26,"steps":26,"cost":8.55185,"added":12505.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-08-25","pane":{"calls":127,"steps":224,"cost":28.55236,"added":98649.0},"chrome":{"calls":3,"steps":3,"cost":0.61842,"added":1262.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-08-26","pane":{"calls":38,"steps":66,"cost":4.85937,"added":35466.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-08-27","pane":{"calls":132,"steps":161,"cost":40.20935,"added":74149.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-08-28","pane":{"calls":59,"steps":106,"cost":14.85742,"added":45298.5},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-08-29","pane":{"calls":78,"steps":78,"cost":23.65234,"added":59117.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-08-30","pane":{"calls":25,"steps":25,"cost":3.5495,"added":17223.5},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-08-31","pane":{"calls":48,"steps":48,"cost":10.31841,"added":29190.5},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-09-01","pane":{"calls":140,"steps":224,"cost":14.11109,"added":113874.01667},"chrome":{"calls":2,"steps":2,"cost":0.27922,"added":1442.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-09-02","pane":{"calls":134,"steps":229,"cost":20.10022,"added":589900.66667},"chrome":{"calls":2,"steps":2,"cost":0.09824,"added":999.5},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-09-03","pane":{"calls":8,"steps":8,"cost":0.87309,"added":4796.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-09-04","pane":{"calls":30,"steps":61,"cost":3.41394,"added":33051.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-09-05","pane":{"calls":57,"steps":106,"cost":6.55709,"added":98960.20833},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-09-06","pane":{"calls":33,"steps":53,"cost":4.28112,"added":36422.60952},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-09-07","pane":{"calls":14,"steps":14,"cost":1.816,"added":9065.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-09-09","pane":{"calls":45,"steps":227,"cost":7.64898,"added":91758.15},"chrome":{"calls":2,"steps":2,"cost":0.58846,"added":1129.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-09-10","pane":{"calls":33,"steps":95,"cost":4.20432,"added":42438.58333},"chrome":{"calls":2,"steps":2,"cost":0.26908,"added":1550.75},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-09-11","pane":{"calls":177,"steps":379,"cost":30.49474,"added":160934.49167},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-09-12","pane":{"calls":80,"steps":222,"cost":18.91502,"added":74757.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-09-13","pane":{"calls":144,"steps":450,"cost":27.78502,"added":189938.83333},"chrome":{"calls":2,"steps":2,"cost":0.13787,"added":570.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-09-15","pane":{"calls":12,"steps":16,"cost":1.03454,"added":6811.0},"chrome":{"calls":1,"steps":1,"cost":0.04109,"added":323.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-09-16","pane":{"calls":29,"steps":156,"cost":4.2854,"added":56190.66667},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-09-17","pane":{"calls":144,"steps":306,"cost":22.70648,"added":152779.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-09-18","pane":{"calls":58,"steps":185,"cost":14.61242,"added":62731.0},"chrome":{"calls":1,"steps":1,"cost":0.06634,"added":350.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-09-19","pane":{"calls":95,"steps":172,"cost":20.73789,"added":105346.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-09-20","pane":{"calls":46,"steps":92,"cost":14.10993,"added":47653.0},"chrome":{"calls":70,"steps":259,"cost":30.34553,"added":74662.83333},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-09-21","pane":{"calls":44,"steps":78,"cost":5.8546,"added":35054.0},"chrome":{"calls":95,"steps":426,"cost":23.47491,"added":538465.05},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-09-22","pane":{"calls":141,"steps":217,"cost":16.89996,"added":111558.16667},"chrome":{"calls":193,"steps":608,"cost":27.20989,"added":286765.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-09-23","pane":{"calls":95,"steps":155,"cost":8.04352,"added":75355.0},"chrome":{"calls":230,"steps":1047,"cost":38.19546,"added":1242823.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-09-24","pane":{"calls":98,"steps":158,"cost":4.622,"added":90483.83333},"chrome":{"calls":61,"steps":263,"cost":16.24751,"added":743549.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-09-25","pane":{"calls":2,"steps":2,"cost":0.14696,"added":918.0},"chrome":{"calls":229,"steps":658,"cost":32.64036,"added":367153.5},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-09-26","pane":{"calls":73,"steps":125,"cost":3.42464,"added":80153.33333},"chrome":{"calls":239,"steps":239,"cost":8.97358,"added":164918.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-09-27","pane":{"calls":29,"steps":54,"cost":0.95377,"added":17283.83333},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"saved":0.0,"avoided":0,"tokensAvoided":0,"jev":0,"jevCost":0.0},{"day":"2026-09-28","pane":{"calls":190,"steps":286,"cost":11.99532,"added":172516.75},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":16,"steps":22,"cost":0.54596,"added":13901.0},"saved":-0.01513,"avoided":-0.32318,"tokensAvoided":-69640.94248,"jev":13,"jevCost":0.0026},{"day":"2026-09-29","pane":{"calls":219,"steps":313,"cost":15.14627,"added":208394.86667},"chrome":{"calls":3,"steps":3,"cost":0.06625,"added":921.0},"jevb":{"calls":48,"steps":78,"cost":3.62145,"added":49933.5},"saved":0.23757,"avoided":7.30597,"tokensAvoided":529342.66351,"jev":90,"jevCost":0.018},{"day":"2026-09-30","pane":{"calls":67,"steps":178,"cost":4.15295,"added":66985.16667},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":106,"steps":219,"cost":7.763,"added":105976.5},"saved":3.72717,"avoided":49.84308,"tokensAvoided":14919052.97772,"jev":175,"jevCost":0.035},{"day":"2026-10-01","pane":{"calls":62,"steps":163,"cost":4.23858,"added":63127.5},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":13,"steps":15,"cost":0.54149,"added":16406.0},"saved":-0.19603,"avoided":-2.31126,"tokensAvoided":-364965.45408,"jev":4,"jevCost":0.0008},{"day":"2026-10-02","pane":{"calls":189,"steps":316,"cost":9.5341,"added":183229.0},"chrome":{"calls":1,"steps":1,"cost":0.02013,"added":323.0},"jevb":{"calls":141,"steps":173,"cost":6.99638,"added":243055.5},"saved":0.45162,"avoided":8.06426,"tokensAvoided":1542733.63288,"jev":107,"jevCost":0.0214},{"day":"2026-10-03","pane":{"calls":116,"steps":131,"cost":5.37458,"added":74350.5},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":336,"steps":557,"cost":22.12934,"added":545917.0},"saved":8.70318,"avoided":110.54312,"tokensAvoided":33994421.82286,"jev":356,"jevCost":0.0712},{"day":"2026-10-04","pane":{"calls":4,"steps":4,"cost":0.32855,"added":1777.5},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":23,"steps":64,"cost":2.53572,"added":15502.5},"saved":2.60947,"avoided":16.13511,"tokensAvoided":11036336.55265,"jev":67,"jevCost":0.0134},{"day":"2026-10-05","pane":{"calls":21,"steps":21,"cost":1.34319,"added":12965.0},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":113,"steps":224,"cost":12.74545,"added":100902.0},"saved":3.63441,"avoided":29.17993,"tokensAvoided":15471864.83551,"jev":167,"jevCost":0.0334},{"day":"2026-10-06","pane":{"calls":11,"steps":11,"cost":0.60473,"added":5460.66667},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":34,"steps":47,"cost":1.67117,"added":38329.0},"saved":0.09644,"avoided":3.20994,"tokensAvoided":-39802.68278,"jev":36,"jevCost":0.0072},{"day":"2026-10-07","pane":{"calls":39,"steps":44,"cost":1.59059,"added":16492.33333},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":61,"steps":129,"cost":4.82344,"added":84380.0},"saved":3.03183,"avoided":37.4232,"tokensAvoided":12174749.91055,"jev":204,"jevCost":0.0408},{"day":"2026-10-08","pane":{"calls":7,"steps":7,"cost":0.25026,"added":2116.5},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":29,"steps":44,"cost":1.21206,"added":50182.0},"saved":-0.14109,"avoided":2.35365,"tokensAvoided":404959.29415,"jev":41,"jevCost":0.0082},{"day":"2026-10-09","pane":{"calls":17,"steps":17,"cost":0.71301,"added":17145.0},"chrome":{"calls":2,"steps":2,"cost":0.04788,"added":552.0},"jevb":{"calls":42,"steps":80,"cost":2.7653,"added":115631.0},"saved":0.60044,"avoided":14.51259,"tokensAvoided":2402706.58271,"jev":92,"jevCost":0.0184},{"day":"2026-10-10","pane":{"calls":9,"steps":9,"cost":0.46094,"added":4172.5},"chrome":{"calls":0,"steps":0,"cost":0.0,"added":0.0},"jevb":{"calls":1,"steps":2,"cost":0.19877,"added":495.0},"saved":0.08451,"avoided":0.42517,"tokensAvoided":406626.48114,"jev":2,"jevCost":0.0004}],"recent":[{"ts":"2026-10-10T21:22:47.905Z","kind":"pane","label":"computer \u00b7 zoom","steps":1,"cost":0.07429,"saved":0},{"ts":"2026-10-10T21:22:44.514Z","kind":"pane","label":"computer \u00b7 screenshot","steps":1,"cost":0.06185,"saved":0},{"ts":"2026-10-10T21:22:35.035Z","kind":"pane","label":"navigate","steps":1,"cost":0.02974,"saved":0},{"ts":"2026-10-10T21:22:18.895Z","kind":"pane","label":"computer \u00b7 screenshot","steps":1,"cost":0.07919,"saved":0},{"ts":"2026-10-10T21:22:13.628Z","kind":"pane","label":"preview_start","steps":1,"cost":0.0532,"saved":0},{"ts":"2026-10-10T20:42:16.870Z","kind":"pane","label":"read_console_messages","steps":1,"cost":0.05895,"saved":0},{"ts":"2026-10-10T20:42:11.396Z","kind":"pane","label":"preview_start","steps":1,"cost":0.04875,"saved":0},{"ts":"2026-10-10T20:42:06.337Z","kind":"pane","label":"read_console_messages","steps":1,"cost":0.0271,"saved":0},{"ts":"2026-10-10T20:39:32.357Z","kind":"pane","label":"read_console_messages","steps":1,"cost":0.02788,"saved":0},{"ts":"2026-10-10T14:21:02.271Z","kind":"jevb","label":"open \u00b7 check","steps":2,"cost":0.19877,"saved":0.08451},{"ts":"2026-10-10T02:37:54.982Z","kind":"jevb","label":"run","steps":2,"cost":0.06067,"saved":0.0258},{"ts":"2026-10-10T02:36:46.846Z","kind":"jevb","label":"run","steps":2,"cost":0.06167,"saved":0.02622},{"ts":"2026-10-10T02:13:39.762Z","kind":"jevb","label":"open \u00b7 shot \u00b7 scroll","steps":6,"cost":0.0189,"saved":0.06189},{"ts":"2026-10-10T00:52:40.245Z","kind":"jevb","label":"read screenshot","steps":0,"cost":0.10786,"saved":-0.10786},{"ts":"2026-10-10T00:50:28.008Z","kind":"jevb","label":"open \u00b7 shot","steps":2,"cost":0.09952,"saved":0.04231}],"scan":{"events":10300,"filesParsed":5,"seconds":1.9},"refresh":"every 15 minutes while the Mac is awake"}</script>
+<script>
+(function () {
+  const data = JSON.parse(document.getElementById('savings-data').textContent || 'null');
+  const $ = (id) => document.getElementById(id);
+  const NS = 'http://www.w3.org/2000/svg';
+  const KINDS = [
+    { key: 'jevb', name: 'jevb' },
+    { key: 'pane', name: 'Built-in pane' },
+    { key: 'chrome', name: 'Claude in Chrome' },
+  ];
+  const nameOf = (k) => KINDS.find((x) => x.key === k).name;
+
+  const usd = (v, opts = {}) => {
+    const a = Math.abs(v);
+    if (a < 0.0005) return '$0';
+    const digits = a >= 100 ? 0 : a >= 1 ? 2 : a >= 0.01 ? 2 : 3;
+    const s = '$' + a.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+    if (opts.signed) return (v > 0.0005 ? '+' : v < -0.0005 ? '−' : '') + s;
+    return (v < 0 ? '−' : '') + s;
+  };
+  const int = (v) => Math.round(v).toLocaleString('en-US');
+  const tokens = (v) => v >= 1e6 ? (v / 1e6).toFixed(1) + 'M' : v >= 1e4 ? Math.round(v / 1e3) + 'K' : v >= 1e3 ? (v / 1e3).toFixed(1) + 'K' : int(v);
+  const dayFmt = (d, withDay) => new Date(d + 'T12:00:00').toLocaleDateString('en-US', withDay ? { weekday: 'short', month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric' });
+  const ago = (iso) => {
+    const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+    if (s < 60) return 'just now';
+    if (s < 3600) return Math.round(s / 60) + ' min ago';
+    if (s < 86400) return Math.round(s / 3600) + ' h ago';
+    return Math.round(s / 86400) + ' d ago';
+  };
+  const el = (tag, attrs = {}, text) => {
+    const n = tag in { svg: 1, g: 1, rect: 1, path: 1, line: 1, text: 1, circle: 1, clipPath: 1, defs: 1 } ? document.createElementNS(NS, tag) : document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+    if (text != null) n.textContent = text;
+    return n;
+  };
+  const sw = (k) => '<i class="sw ' + k + '"></i>';
+
+  if (!data) {
+    $('updated').textContent = 'No data yet';
+    $('figures').innerHTML = '<p class="empty">The numbers appear after the first refresh.</p>';
+    return;
+  }
+
+  // Status line
+  const live = $('live');
+  const tickStatus = () => {
+    $('updated').textContent = 'Updated ' + ago(data.generatedAt);
+    live.classList.toggle('stale', Date.now() - new Date(data.generatedAt).getTime() > 3 * 3600e3);
+  };
+  tickStatus();
+  setInterval(tickStatus, 30000);
+  $('span').textContent = (data.refresh ? 'Refreshes ' + data.refresh + ' · ' : '') + 'Transcripts since ' + dayFmt(data.firstDay);
+
+  const all = data.totals.all, rule = data.totals.sinceRule;
+  const plan = data.plan, weekUsd = plan ? plan.monthlyUsd * 12 / 52 : 0;
+  const pct = (v) => (v < 0.1 ? v.toFixed(2) : v.toFixed(1)) + '%';
+  const ruleAt = new Date(data.ruleAt);
+  const ruleLabel = ruleAt.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const netAll = all.saved - all.jevCost, netRule = rule.saved - rule.jevCost;
+  const ruleCalls = rule.jevb.calls + rule.pane.calls + rule.chrome.calls;
+  const share = ruleCalls ? rule.jevb.calls / ruleCalls : null;
+
+  const figs = [
+    { cls: 'hero', label: 'Net saved', value: usd(netAll), sub: usd(netRule, { signed: true }) + ' since the jevb rule (' + ruleLabel + ')' },
+    { label: 'Max plan limit saved', value: plan ? pct(netAll / plan.usdPerWeeklyPercent) : '—', sub: plan ? 'of a weekly ' + plan.name + ' limit, worth ' + usd(netAll / plan.usdPerWeeklyPercent * weekUsd / 100) + ' of the $' + plan.monthlyUsd + '/month plan' : 'No plan calibration' },
+    { label: 'Round trips avoided', value: int(all.avoided), sub: tokens(all.tokensAvoided) + ' tokens not re-read' },
+    { label: 'jevb share since the rule', value: share == null ? '—' : Math.round(share * 100) + '%', sub: share == null ? 'No browser calls yet' : int(rule.jevb.calls) + ' of ' + int(ruleCalls) + ' browser calls' },
+  ];
+  $('figures').innerHTML = figs.map((f) => '<div class="fig ' + (f.cls || '') + '"><span class="label">' + f.label + '</span><span class="value">' + f.value + '</span><span class="sub">' + f.sub + '</span></div>').join('');
+
+  // Tooltip helper
+  function tipFor(host) {
+    const tip = el('div', { class: 'tip', role: 'status' });
+    tip.hidden = true;
+    host.appendChild(tip);
+    return {
+      show(html, x, y) {
+        tip.innerHTML = html;
+        tip.hidden = false;
+        const hw = host.clientWidth, tw = tip.offsetWidth;
+        tip.style.left = Math.min(Math.max(0, x - tw / 2), hw - tw) + 'px';
+        tip.style.top = Math.max(0, y - tip.offsetHeight - 12) + 'px';
+      },
+      hide() { tip.hidden = true; },
+    };
+  }
+  const niceMax = (v) => {
+    if (v <= 0) return 1;
+    const p = Math.pow(10, Math.floor(Math.log10(v)));
+    for (const m of [1, 2, 2.5, 5, 10]) if (m * p >= v) return m * p;
+    return 10 * p;
+  };
+
+  // Every day from jevb's first use to today, zero-filled
+  const byDay = Object.fromEntries(data.days.map((d) => [d.day, d]));
+  const lastDay = data.days.length ? data.days[data.days.length - 1].day : null;
+  const firstJevbDay = (data.days.find((d) => d.jevb.calls > 0) || data.days[0] || {}).day;
+  const days = [];
+  if (lastDay) {
+    const end = new Date(lastDay + 'T12:00:00');
+    for (let d = new Date(firstJevbDay + 'T12:00:00'); d <= end; d.setDate(d.getDate() + 1)) {
+      const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      days.push(byDay[key] || { day: key, jevb: { calls: 0, cost: 0 }, pane: { calls: 0, cost: 0 }, chrome: { calls: 0, cost: 0 }, saved: 0, jevCost: 0 });
+    }
+    $('calls-span').textContent = 'Since jevb\'s first use, ' + dayFmt(firstJevbDay);
+  }
+  const ruleDay = ruleAt.getFullYear() + '-' + String(ruleAt.getMonth() + 1).padStart(2, '0') + '-' + String(ruleAt.getDate()).padStart(2, '0');
+
+  // Chart 1: stacked daily calls
+  (function callsChart() {
+    const host = $('calls-chart');
+    if (!days.length) { host.innerHTML = '<p class="empty">No browser calls yet.</p>'; return; }
+    const W = 480, H = 240, L = 40, R = 8, T = 22, B = 26;
+    const pw = W - L - R, ph = H - T - B;
+    const total = (d) => d.jevb.calls + d.pane.calls + d.chrome.calls;
+    const max = niceMax(Math.max(...days.map(total)));
+    const y = (v) => T + ph - (v / max) * ph;
+    const slot = pw / days.length, bw = Math.min(26, Math.max(3, slot - 3));
+    const labelEvery = Math.max(1, Math.ceil(days.length / 8));
+    const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Browser calls per day since jevb was first used, stacked by tool' });
+    const defs = el('defs'); svg.appendChild(defs);
+    for (let i = 0; i <= 4; i++) {
+      const v = (max / 4) * i, yy = y(v);
+      svg.appendChild(el('line', { class: i ? 'gridline' : 'axis', x1: L, x2: W - R, y1: yy, y2: yy }));
+      svg.appendChild(el('text', { x: L - 6, y: yy + 3.5, 'text-anchor': 'end' }, int(v)));
+    }
+    const tip = tipFor(host);
+    days.forEach((d, i) => {
+      const x = L + i * slot + (slot - bw) / 2;
+      const t = total(d);
+      if ((days.length - 1 - i) % labelEvery === 0) svg.appendChild(el('text', { x: x + bw / 2, y: H - 8, 'text-anchor': 'middle' }, dayFmt(d.day)));
+      if (d.day === ruleDay) {
+        const mx = x + bw / 2;
+        svg.appendChild(el('line', { class: 'marker', x1: mx, x2: mx, y1: T - 6, y2: T + ph }));
+        svg.appendChild(el('text', { class: 'marker-label', x: mx - 4, y: T - 10, 'text-anchor': 'end' }, 'jevb rule'));
+      }
+      const band = el('rect', { x: L + i * slot, y: T, width: slot, height: ph, fill: 'transparent' });
+      svg.appendChild(band);
+      if (t) {
+        const cid = 'bar' + i;
+        const clip = el('clipPath', { id: cid });
+        const top = y(t), r = Math.min(4, bw / 2);
+        clip.appendChild(el('path', { d: `M${x},${T + ph} V${top + r} Q${x},${top} ${x + r},${top} H${x + bw - r} Q${x + bw},${top} ${x + bw},${top + r} V${T + ph} Z` }));
+        defs.appendChild(clip);
+        const g = el('g', { 'clip-path': `url(#${cid})` });
+        let acc = 0;
+        for (const k of ['jevb', 'pane', 'chrome']) {
+          const v = d[k].calls;
+          if (!v) continue;
+          const y0 = y(acc), y1 = y(acc + v);
+          const gap = acc ? 2 : 0;
+          g.appendChild(el('rect', { x, y: y1, width: bw, height: Math.max(0.5, y0 - y1 - gap), style: `fill:var(--s-${k})` }));
+          acc += v;
+        }
+        svg.appendChild(g);
+      }
+      const hit = el('rect', { class: 'hit', x: L + i * slot, y: T, width: slot, height: ph });
+      hit.addEventListener('mouseenter', () => {
+        band.classList.add('band-on');
+        const rect = host.getBoundingClientRect(), s = rect.width / W;
+        const rows = KINDS.map((k) => `<div class="row"><span>${sw(k.key)}${k.name}</span><span class="num">${int(d[k.key].calls)}</span></div>`).join('');
+        tip.show(`<b>${dayFmt(d.day, true)}</b>${rows}<div class="row"><span>Saved</span><span class="num">${usd((d.saved || 0) - (d.jevCost || 0), { signed: true })}</span></div>`, (L + i * slot + slot / 2) * s, y(t || 0) * s);
+      });
+      hit.addEventListener('mouseleave', () => { band.classList.remove('band-on'); tip.hide(); });
+      svg.appendChild(hit);
+    });
+    host.appendChild(svg);
+  })();
+
+  // Chart 2: running total saved, from the first day jevb was used
+  (function savedChart() {
+    const host = $('saved-chart');
+    const firstJevb = data.days.find((d) => d.jevb.calls > 0);
+    if (!firstJevb) { host.innerHTML = '<p class="empty">No jevb calls yet.</p>'; return; }
+    const series = [];
+    let acc = 0;
+    const start = new Date(firstJevb.day + 'T12:00:00'), end = new Date(lastDay + 'T12:00:00');
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+      const row = byDay[key];
+      acc += row ? row.saved - row.jevCost : 0;
+      series.push({ day: key, v: acc, dayNet: row ? row.saved - row.jevCost : 0 });
+    }
+    const W = 480, H = 240, L = 48, R = 56, T = 22, B = 26;
+    const pw = W - L - R, ph = H - T - B;
+    const lo = Math.min(0, ...series.map((p) => p.v)), hi = niceMax(Math.max(...series.map((p) => p.v), 0.01));
+    const y = (v) => T + ph - ((v - lo) / (hi - lo)) * ph;
+    const x = (i) => L + (series.length === 1 ? pw / 2 : (i / (series.length - 1)) * pw);
+    const svg = el('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Running total of net savings from jevb at API prices' });
+    for (let i = 0; i <= 4; i++) {
+      const v = lo + ((hi - lo) / 4) * i, yy = y(v);
+      svg.appendChild(el('line', { class: Math.abs(v) < 1e-9 ? 'axis' : 'gridline', x1: L, x2: W - R, y1: yy, y2: yy }));
+      svg.appendChild(el('text', { x: L - 6, y: yy + 3.5, 'text-anchor': 'end' }, usd(v)));
+    }
+    const step = Math.max(1, Math.ceil(series.length / 5));
+    series.forEach((p, i) => { if ((series.length - 1 - i) % step === 0) svg.appendChild(el('text', { x: x(i), y: H - 8, 'text-anchor': 'middle' }, dayFmt(p.day))); });
+    const ri = series.findIndex((p) => p.day === ruleDay);
+    if (ri >= 0) {
+      svg.appendChild(el('line', { class: 'marker', x1: x(ri), x2: x(ri), y1: T - 6, y2: T + ph }));
+      svg.appendChild(el('text', { class: 'marker-label', x: x(ri) - 4, y: T - 10, 'text-anchor': 'end' }, 'jevb rule'));
+    }
+    const line = series.map((p, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ',' + y(p.v).toFixed(1)).join(' ');
+    svg.appendChild(el('path', { d: `${line} L${x(series.length - 1)},${y(lo)} L${x(0)},${y(lo)} Z`, style: 'fill:var(--s-jevb);opacity:0.12' }));
+    svg.appendChild(el('path', { d: line, style: 'fill:none;stroke:var(--s-jevb);stroke-width:2;stroke-linejoin:round;stroke-linecap:round' }));
+    const last = series[series.length - 1];
+    svg.appendChild(el('circle', { cx: x(series.length - 1), cy: y(last.v), r: 4.5, style: 'fill:var(--s-jevb);stroke:var(--surface);stroke-width:2' }));
+    svg.appendChild(el('text', { x: x(series.length - 1) + 8, y: y(last.v) + 4, style: 'fill:var(--ink);font-weight:500' }, usd(last.v)));
+    const cross = el('line', { class: 'marker', x1: 0, x2: 0, y1: T, y2: T + ph, visibility: 'hidden' });
+    const dot = el('circle', { r: 4.5, visibility: 'hidden', style: 'fill:var(--s-jevb);stroke:var(--surface);stroke-width:2' });
+    svg.appendChild(cross); svg.appendChild(dot);
+    const tip = tipFor(host);
+    const hit = el('rect', { class: 'hit', x: L, y: T, width: pw, height: ph });
+    hit.addEventListener('mousemove', (ev) => {
+      const rect = svg.getBoundingClientRect(), s = rect.width / W;
+      const vx = (ev.clientX - rect.left) / s;
+      const i = Math.max(0, Math.min(series.length - 1, Math.round(((vx - L) / pw) * (series.length - 1))));
+      const p = series[i];
+      cross.setAttribute('x1', x(i)); cross.setAttribute('x2', x(i)); cross.setAttribute('visibility', 'visible');
+      dot.setAttribute('cx', x(i)); dot.setAttribute('cy', y(p.v)); dot.setAttribute('visibility', 'visible');
+      tip.show(`<b>${dayFmt(p.day, true)}</b><div class="row"><span>Running total</span><span class="num">${usd(p.v)}</span></div><div class="row"><span>That day</span><span class="num">${usd(p.dayNet, { signed: true })}</span></div>`, x(i) * s, y(p.v) * s);
+    });
+    hit.addEventListener('mouseleave', () => { cross.setAttribute('visibility', 'hidden'); dot.setAttribute('visibility', 'hidden'); tip.hide(); });
+    svg.appendChild(hit);
+    host.appendChild(svg);
+  })();
+
+  // Per-tool table
+  $('tool-span').textContent = 'Since ' + dayFmt(data.firstDay) + ' · API prices';
+  $('tools').innerHTML = '<thead><tr><th>Tool</th><th class="r">Calls</th><th class="r">Browser steps</th><th class="r">Steps per call</th><th class="r">Context added per call</th><th class="r">API cost</th></tr></thead><tbody>' +
+    KINDS.map((k) => {
+      const t = all[k.key];
+      return `<tr><td><span class="tool">${sw(k.key)}${k.name}</span></td><td class="r num">${int(t.calls)}</td><td class="r num">${int(t.steps)}</td><td class="r num">${t.calls ? (t.steps / t.calls).toFixed(2) : '—'}</td><td class="r num">${t.calls ? tokens(t.added / t.calls) : '—'}</td><td class="r num">${usd(t.cost)}</td></tr>`;
+    }).join('') + '</tbody>';
+
+  // Live feed
+  const feed = data.recent.slice(0, 15);
+  $('feed').innerHTML = feed.length ? '<thead><tr><th>When</th><th>Tool</th><th>What it ran</th><th class="r">Steps</th><th class="r">Round trip</th><th class="r">Saved</th></tr></thead><tbody>' +
+    feed.map((r) => {
+      const cls = r.kind !== 'jevb' ? 'zero' : r.saved > 0.0005 ? 'pos' : r.saved < -0.0005 ? 'neg' : 'zero';
+      const time = new Date(r.ts).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+      return `<tr><td class="when" title="${time}">${ago(r.ts)}</td><td><span class="tool">${sw(r.kind)}${nameOf(r.kind)}</span></td><td class="what"></td><td class="r num">${int(r.steps)}</td><td class="r num">${usd(r.cost)}</td><td class="r num ${cls}">${r.kind === 'jevb' ? usd(r.saved, { signed: true }) : '—'}</td></tr>`;
+    }).join('') + '</tbody>' : '<tbody><tr><td class="empty">No browser calls yet.</td></tr></tbody>';
+  feed.forEach((r, i) => { const c = $('feed').querySelectorAll('td.what')[i]; if (c) c.textContent = r.label; });
+
+  // Method
+  const ratio = data.paneStepsPerCall;
+  $('method').innerHTML = [
+    'Every browser tool call in the Claude Code transcripts on this Mac counts: the built-in pane, Claude in Chrome, and shell commands that run <code>jevb</code>. Subagent sessions count too.',
+    'A call costs the API request that follows it, because Claude re-reads the whole conversation to continue after each tool result. Parallel calls in one turn split that request. Prices are Anthropic API list prices for the model that ran, cache reads and writes included.',
+    `A browser step is one action: open, click, type, check, read, screenshot. Pane calls average <b class="num">${ratio.toFixed(2)}</b> steps each (batches included). A jevb turn that runs N steps would have taken N ÷ ${ratio.toFixed(2)} pane calls, so it saves the difference in round trips at that turn's price.`,
+    'jevb overhead counts against it: reading a jevb screenshot back is a call with no steps, and so are <code>jevb close</code> and <code>jevb stop</code>. Jev, the model jevb uses to pick elements and judge checks, is billed separately at about $' + data.jevUsd.toFixed(4) + ' per request; the net figures subtract it.',
+    'This undercounts in one way: a pane click usually needs a screenshot first, while a jevb step picks its own target. The page compares calls only, not the work inside them.',
+    'A session resumed or forked into a new transcript repeats its earlier calls; each call is counted once. Sessions spent building jevb itself are left out, since nothing in them replaced pane work.',
+    plan ? `Plan figures: on the ${plan.name} plan these tokens come out of the weekly usage limit, not a bill. Calibration: ${plan.calibration}, so 1% of a week is about ${usd(plan.usdPerWeeklyPercent)} at API prices. A week of the $${plan.monthlyUsd}/month plan is worth ${usd(weekUsd)}. Usage outside Claude Code on this Mac also counts against the limit, so treat the plan figure as approximate.` : '',
+    'Only totals, tool names and jevb command names leave the Mac. No prompts, page content, URLs or project names.',
+  ].filter(Boolean).map((s) => '<li>' + s + '</li>').join('');
+
+  // Daily table (all days with any browser call)
+  $('daily').innerHTML = '<thead><tr><th>Day</th><th class="r">jevb</th><th class="r">Pane</th><th class="r">Chrome</th><th class="r">Net saved</th></tr></thead><tbody>' +
+    data.days.slice().reverse().map((d) => `<tr><td>${dayFmt(d.day, true)}</td><td class="r num">${int(d.jevb.calls)}</td><td class="r num">${int(d.pane.calls)}</td><td class="r num">${int(d.chrome.calls)}</td><td class="r num">${d.jevb.calls ? usd(d.saved - d.jevCost, { signed: true }) : '—'}</td></tr>`).join('') + '</tbody>';
+})();
+</script>
+
+</body></html>

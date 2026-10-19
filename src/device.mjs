@@ -417,6 +417,59 @@ export class JevDevice {
         return s.pageTop
     }
 
+    // The focused native element, once it is the target. The tap can miss:
+    // on Android the keyboard opened by the previous field covers the next
+    // one (a Galaxy A13 login form), the tap lands on the keyboard, focus
+    // stays put, and a password went into the email field in plain text.
+    // So close the keyboard and tap again; give up rather than type into the
+    // wrong field. A hit is focus that moved to a new element, or one where
+    // the target is (a WebView scrolls the focused field into view, so its
+    // spot can change); a password field must also say it is one. Null when
+    // nothing has focus, or (for a password) when focus can't be confirmed.
+    async focusedTarget(s, el, pc, secret, before) {
+        const get = (id, what) => s.wd.req('GET', s.wd.s(`/element/${id}/${what}`)).catch(() => null)
+        const check = async () => {
+            // UiAutomator2's active element can miss a WebView field that
+            // just took focus (seen right after the keyboard reopened); the
+            // tree's focused flag still has it, and it can take a moment.
+            let id = null
+            for (let i = 0; i < 4 && !id; i++) {
+                if (i) await sleep(300)
+                id = await s.wd.activeElement().catch(() => null)
+                if (!id && s.platform === 'android') {
+                    const found = await s.wd.req('POST', s.wd.s('/element'), { using: 'xpath', value: "//*[@focused='true' and (@class='android.widget.EditText' or @password='true')]" }).catch(() => null)
+                    id = found && Object.values(found)[0]
+                }
+            }
+            if (!id) { this.log(`focus check for ${el.label || el.role}: nothing has focus`); return { id } }
+            const r = await get(id, 'rect')
+            const t = el.rect
+            const inside = (px, py, b) => px >= b.x - 2 && px <= b.x + b.w + 2 && py >= b.y - 2 && py <= b.y + b.h + 2
+            const at = r && (inside(r.x + r.width / 2, r.y + r.height / 2, t) || inside(t.x + t.w / 2, t.y + t.h / 2, { x: r.x, y: r.y, w: r.width, h: r.height }))
+            const moved = id !== before
+            const pw = s.platform === 'android' ? await get(id, 'attribute/password') : null
+            // A password needs proof: the field says it is one, or (no such
+            // attribute, as on iOS) it is where the target is.
+            const ok = secret
+                ? (pw == null ? Boolean(at) : String(pw) === 'true' && Boolean(at || moved))
+                : Boolean(at || moved) && String(pw) !== 'true'
+            this.log(`focus check for ${el.label || el.role}: ${id === before ? 'same element' : 'new element'}, rect ${r ? `${r.x},${r.y} ${r.width}x${r.height}` : 'unreadable'}, password=${pw}`)
+            return { id, ok, known: r != null || pw != null }
+        }
+        let f = await check()
+        if (!f.ok) {
+            this.log(`tap on ${el.desc} didn't move focus to it; closing the keyboard and tapping again`)
+            await this.pressNative(s, 'HideKeyboard').catch(() => {})
+            await sleep(400)
+            await this.tap(s, el, pc)
+            await sleep(pc === 'human' ? rand(300, 600) : 300)
+            f = await check()
+        }
+        if (f.ok) return f.id
+        if (f.id && f.known) throw new Error(`tapping ${el.desc} didn't focus it; not typing into another field`)
+        return secret ? null : f.id || null
+    }
+
     // A field's current text; null when it can't be read. iOS reports an
     // empty field's placeholder as its value, so that counts as empty.
     async fieldValue(s, id, web) {
@@ -486,16 +539,22 @@ export class JevDevice {
     async type(intent, text, { session, pace: p, submit = false, checks } = {}) {
         const pc = pace.resolvePace(p || this.pace)
         const { s, el, target, checks: checkResults } = await this.find(intent, { session, checks })
+        // Password fields read back masked, and their text must never reach a
+        // log: no read-back for them.
+        const secret = /password|secure/i.test(`${el.role} ${el.label}`)
+        const focusedBefore = el.web ? null : await s.wd.activeElement().catch(() => null)
         const tapped = await this.tap(s, el, pc)
         await sleep(pc === 'human' ? rand(300, 600) : 300) // keyboard comes up
         // Web fields and iOS append each element send. UiAutomator2 replaces
         // the whole value (and key events go through the IME, which
         // autocapitalizes), so native Android sets prefix + typed-so-far.
-        const field = el.web ? tapped : await s.wd.activeElement().catch(() => null)
+        const field = el.web ? tapped : await this.focusedTarget(s, el, pc, secret, focusedBefore)
         // A stale tree (an Android WebView's) can hide the focused field from
         // WebDriver: the tap (often a screenshot one) focused it, so type as
-        // key presses into whatever has focus. No read-back possible.
+        // key presses into whatever has focus. No read-back possible, so
+        // never a password: it would land in plain text wherever focus is.
         if (!field) {
+            if (secret) throw new Error(`can't confirm ${target.desc} has focus; not typing a password blind`)
             await s.wd.actions([{ type: 'key', id: 'keyboard', actions: [...text].flatMap((c) => [{ type: 'keyDown', value: c }, { type: 'keyUp', value: c }]) }])
             await s.wd.releaseActions()
             if (submit) await this.press('Enter', { session, pace: pc })
@@ -504,9 +563,6 @@ export class JevDevice {
         }
         const replaces = !el.web && s.platform === 'android'
         const prefix = replaces ? el.value || '' : ''
-        // Password fields read back masked, and their text must never reach a
-        // log: no read-back for them.
-        const secret = /password|secure/i.test(`${el.role} ${el.label}`)
         const before = replaces || secret ? '' : (await this.fieldValue(s, field, el.web)) ?? ''
         let typed = ''
         const send = (chunk) => { typed += chunk; return s.wd.sendKeysTo(field, replaces ? prefix + typed : chunk) }

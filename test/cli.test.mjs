@@ -34,6 +34,14 @@ test('open → snap → act → check across separate CLI calls', async () => {
     assert.equal((await jevb('check', 'is "Posted: from the cli" shown?')).code, 0)
 })
 
+test('--fast is a bare flag: it takes no value from the next argument', async () => {
+    const open = await jevb('open', '--fast', site.url('flow.html'), '--session', 'fast')
+    assert.equal(open.code, 0, open.out)
+    assert.match(json(open).url, /flow\.html$/)
+    assert.equal((await jevb('check', 'is "Post reply" shown?', '--session', 'fast', '--fast')).code, 0)
+    await jevb('close', '--session', 'fast')
+})
+
 test('exit 1 on a failed check, refute, batch, or no match', async () => {
     await jevb('open', site.url('flow.html'), '--pace', 'agent')
     assert.equal((await jevb('check', 'is "Nope" shown?')).code, 1)

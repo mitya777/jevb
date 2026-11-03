@@ -8,7 +8,7 @@
 //   no pauses; waits only on the page itself (load + network idle, capped).
 // fast: agent's input, without waiting for network idle (live SPAs with
 //   polling or analytics rarely reach it, so agent sat out its 3s cap). Done
-//   once the page has text that held still for ~100ms.
+//   once the page has text that held still for ~100ms, 600ms at the least.
 
 const rand = (min, max) => min + Math.random() * (max - min)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -88,13 +88,14 @@ export async function press(page, key, pace) {
 
 // SPAs render after load/networkidle. Wait until there is text and it has
 // stopped changing for two polls (capped), so checks don't judge a blank page.
-async function rendered(page, { maxMs = 4_000, pollMs = 150 } = {}) {
+// minMs: keep watching at least that long, for a render a beat after load.
+async function rendered(page, { maxMs = 4_000, pollMs = 150, minMs = 0 } = {}) {
     const started = Date.now()
     let last = -1, stable = 0
     while (Date.now() - started < maxMs) {
         const len = await page.evaluate(() => document.body?.innerText.length || 0).catch(() => 0)
         stable = len > 0 && len === last ? stable + 1 : 0
-        if (stable >= 2) return
+        if (stable >= 2 && Date.now() - started >= minMs) return
         last = len
         await sleep(pollMs)
     }
@@ -104,7 +105,9 @@ async function rendered(page, { maxMs = 4_000, pollMs = 150 } = {}) {
 // acting. Scale with visible text, capped so tests stay bounded.
 export async function settle(page, pace) {
     await page.waitForLoadState('domcontentloaded').catch(() => {})
-    if (pace === 'fast') return rendered(page, { maxMs: 2_000, pollMs: 50 })
+    // 600ms floor stands in for network idle's 500ms quiet window: an SPA
+    // that renders its feed a beat after load would otherwise look settled.
+    if (pace === 'fast') return rendered(page, { maxMs: 2_000, pollMs: 50, minMs: 600 })
     // Both paces wait for the page itself (SPAs render after DOMContentLoaded);
     // only human adds a reading pause on top.
     await page.waitForLoadState('networkidle', { timeout: pace === 'agent' ? 3_000 : 5_000 }).catch(() => {})

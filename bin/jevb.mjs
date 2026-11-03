@@ -53,7 +53,7 @@ const USAGE = `jevb <command> [args] [--pace human|agent|fast] [--fast] [--sessi
 Pace: human (default) = curved mouse, hover dwell, per-key typing, reading
 pauses. agent = no pauses, waits for network idle (capped at 3s). fast (or
 --fast) = agent without the network-idle wait: done once the page's text holds
-still ~100ms, and a click is done once the requests it started finish. Env: TYPESAFEAI_API_KEY (or ./.env),
+still ~100ms (600ms floor), and a click is done once the requests it started finish. Env: TYPESAFEAI_API_KEY (or ./.env),
 JEVB_PACE, JEVB_PORT, JEVB_IDLE_MS (chromium), JEVB_DAEMON_IDLE_MS, JEVB_HEADED=1,
 JEVB_DEMO=1 (visible cursor + Jev HUD), JEVB_VIDEO=<dir> (record .webm),
 JEVB_CDP_URL (attach to a running Chrome, e.g. from bin/jevb-chrome.sh; tabs open in
@@ -72,7 +72,7 @@ function parseArgs(argv) {
         else if (a.startsWith('--')) {
             const k = a.slice(2)
             const next = argv[i + 1]
-            if (['enter', 'full', 'help', 'no-batch', 'attach'].includes(k)) flags[k] = true
+            if (['enter', 'full', 'help', 'no-batch', 'attach', 'fast'].includes(k)) flags[k] = true
             else if (k === 'check' || k === 'refute') { (flags[k] ||= []).push(next); i++ }
             else { flags[k] = next; i++ }
         } else pos.push(a)

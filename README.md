@@ -172,7 +172,7 @@ Each design choice below came from a measurement:
   and debounce bugs, and makes recordings watchable. `agent` uses direct
   clicks and `fill()`, and waits only on the page, including up to 3s for
   network idle. `fast` (`--fast`) skips that wait: a step is done once the
-  page's text holds still for ~100ms, and a click once the requests it
+  page's text holds still for ~100ms (600ms at the least), and a click once the requests it
   started have finished. Use it on live apps that poll or stream, where
   network idle rarely comes.
 

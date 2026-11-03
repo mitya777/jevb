@@ -253,7 +253,7 @@ export class JevDevice {
             last = cur.key
             await sleep(250)
         }
-        if (pc === 'agent') return
+        if (pace.quick(pc)) return
         await sleep(Math.min(2500, 400 + cur.snap.state.viewport_text.length / 8))
     }
 
@@ -566,7 +566,7 @@ export class JevDevice {
         const before = replaces || secret ? '' : (await this.fieldValue(s, field, el.web)) ?? ''
         let typed = ''
         const send = (chunk) => { typed += chunk; return s.wd.sendKeysTo(field, replaces ? prefix + typed : chunk) }
-        if (pc === 'agent') await send(text)
+        if (pace.quick(pc)) await send(text)
         else {
             for (let i = 0; i < text.length;) {
                 const n = Math.min(text.length - i, Math.ceil(rand(0, 3)))
@@ -690,7 +690,7 @@ export class JevDevice {
         // Agent pace on a web page scrolls the page directly, like the desktop
         // agent pace: a swipe through Device Farm costs ~2.6s on iOS, and the
         // four scrolls of the phone tour were 75s of a 120s agent run.
-        if (pc === 'agent' && s.webContext) {
+        if (pace.quick(pc) && s.webContext) {
             await s.wd.execute(`(${scrollPage})(arguments[0], arguments[1])`, [to, to ? 0 : Number(dy) * (await s.wd.execute('return innerWidth')) / w])
             await this.settle(s, pc)
             return { scrolled: to || Number(dy) }
@@ -701,7 +701,7 @@ export class JevDevice {
             const x = w / 2 + (pc === 'human' ? rand(-w * 0.1, w * 0.1) : 0)
             const y0 = dist > 0 ? h * 0.75 : h * 0.25
             await this.swipe(s, { x, y: y0 }, { x: x + (pc === 'human' ? rand(-15, 15) : 0), y: y0 - dist },
-                pc === 'agent' ? 180 : to ? rand(150, 260) : rand(250, 450))
+                pace.quick(pc) ? 180 : to ? rand(150, 260) : rand(250, 450))
         }
         if (!to) {
             let left = Number(dy)

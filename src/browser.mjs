@@ -200,11 +200,11 @@ export class JevBrowser {
         // settle. Not before 500ms: a click handler's timer that navigates
         // (no request first) is invisible until it fires.
         const pending = new Set()
-        let onRequest, clickedAt, fetched = false
+        let onRequest, clickedAt, fetched = false, navRequested = false
         const onDone = (req) => pending.delete(req)
         const navigated = new Promise((resolve) => {
             onRequest = (req) => {
-                if (req.isNavigationRequest() && req.frame() === page.mainFrame()) resolve(true)
+                if (req.isNavigationRequest() && req.frame() === page.mainFrame()) { navRequested = true; resolve(true) }
                 else if (['fetch', 'xhr', 'ping', 'beacon'].includes(req.resourceType())) { pending.add(req); fetched = true }
             }
             page.on('request', onRequest)
@@ -224,13 +224,17 @@ export class JevBrowser {
         clickedAt = Date.now()
         const nav = pc === 'fast' ? Promise.race([navigated, quiet()]) : navigated
         await pace.settle(page, pc)
-        if (await nav) {
+        let went = await nav
+        if (!went && pc === 'fast') {
+            // A fetch or a navigation can start after quiet() ended, during settle.
+            await drain()
+            went = navRequested
+            if (!went && fetched) await pace.textSettled(page)
+        }
+        if (went) {
             await committed
             await page.waitForLoadState('load', { timeout: 15_000 }).catch(() => {})
             await pace.settle(page, pc)
-        } else if (pc === 'fast') {
-            await drain() // a fetch can start after quiet() ended, during settle
-            if (fetched) await pace.textSettled(page)
         }
         page.off('request', onRequest)
         page.off('requestfinished', onDone)

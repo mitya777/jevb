@@ -173,3 +173,20 @@ test('fast act also waits for a fetch that starts late', async () => {
         assert.equal(c.pass, true)
     } finally { await b.shutdown() }
 })
+
+// A timer navigation that fires after the quiet check, while the page settles.
+test('fast act waits out a navigation that starts during settle', async () => {
+    const b = new JevBrowser({ pace: 'fast' })
+    try {
+        await b.open(site.url('next.html'))
+        const page = await b.page()
+        await page.evaluate(() => {
+            const btn = document.createElement('button')
+            btn.textContent = 'Go back'
+            btn.onclick = () => setTimeout(() => { location.href = '/slow/300/flow.html' }, 580)
+            document.body.append(btn)
+        })
+        const r = await b.act('click "Go back"')
+        assert.match(r.url, /flow\.html$/)
+    } finally { await b.shutdown() }
+})

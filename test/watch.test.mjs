@@ -32,9 +32,9 @@ test('status, snap and phone opens', () => {
     const w = new Watch({ now: clock() })
     assert.equal(w.record('status', {}), null)
     assert.equal(w.record('snap', {}), null)
-    w.record('open', { device: 'pixel 9', app: 'a.apk' })
+    w.record('open', { platform: 'android', device: 'pixel 9', app: 'a.apk' })
     w.record('check', { question: 'is this a login page?', threshold: 0.9 })
-    assert.equal(w.record('scroll', { dy: 'end' }).scenario, 'device pixel 9\napp a.apk\nopen\ncheck@0.9 is this a login page?\nscroll end')
+    assert.equal(w.record('scroll', { dy: 'end' }).scenario, 'platform android\ndevice pixel 9\napp a.apk\nopen\ncheck@0.9 is this a login page?\nscroll end')
 })
 
 test('eval, launch and close end the run', () => {

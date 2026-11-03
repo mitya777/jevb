@@ -12,7 +12,7 @@ const checkLine = (c) => `${c.negate ? 'refute' : 'check'}${c.threshold != null 
 export function stepLines(name, a, nextText) {
     const checks = (a.checks || []).map(checkLine)
     switch (name) {
-        case 'open': return [...(a.device ? [`device ${a.device}`] : []), ...(a.app ? [`app ${a.app}`] : []), a.url ? `open ${a.url}` : 'open']
+        case 'open': return [...(a.platform ? [`platform ${a.platform}`] : []), ...(a.device ? [`device ${a.device}`] : []), ...(a.app ? [`app ${a.app}`] : []), a.url ? `open ${a.url}` : 'open']
         case 'act': return [...checks, `act ${a.intent}`]
         case 'type': return [...checks, `type ${a.intent} => \${${nextText()}}`, ...(a.submit ? ['press Enter'] : [])]
         case 'press': return [`press ${a.key}`]

@@ -1,6 +1,8 @@
-// Three paces for the same actions.
+// Three paces for the same actions. fast is the default; human is the
+// default only while recording (demo overlay or video), where input has to
+// look like a person's to be watchable.
 //
-// human (default): the page sees what a person produces — curved mouse travel,
+// human: the page sees what a person produces — curved mouse travel,
 //   hover before click, per-key typing with jitter, a reading pause after
 //   navigation. Catches hover/focus/debounce/animation bugs that only show up
 //   when input isn't instantaneous, and makes recordings watchable.
@@ -18,8 +20,8 @@ export const PACES = ['human', 'agent', 'fast']
 // agent and fast send the same input; they differ only in how long they wait.
 export const quick = (pace) => pace !== 'human'
 
-export function resolvePace(pace) {
-    const p = pace || process.env.JEVB_PACE || 'human'
+export function resolvePace(pace, fallback = 'fast') {
+    const p = pace || process.env.JEVB_PACE || fallback
     if (!PACES.includes(p)) throw new Error(`unknown pace "${p}" (human|agent|fast)`)
     return p
 }

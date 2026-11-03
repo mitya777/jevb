@@ -28,7 +28,7 @@ export class JevBrowser {
         this.step = ''
         this.jevRequests = 0
         this.jevTokens = { input: 0, output: 0 }
-        this.pace = pace.resolvePace(p)
+        this.pace = pace.resolvePace(p, demo || videoDir ? 'human' : 'fast')
         this.browser = null
         this.launching = null
         this.sessions = new Map() // name -> { context, page }

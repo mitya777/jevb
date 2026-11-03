@@ -91,8 +91,8 @@ jevb stop
 ```
 
 Every command prints one JSON object. The exit code is 1 on an error or a
-failed check. Add `JEVB_HEADED=1` to watch, or `--pace agent` to go as fast
-as the page allows.
+failed check. Steps run at `fast` pace unless you pick another. Add
+`JEVB_HEADED=1` to watch, or `--pace human` to see person-like input.
 
 ## Hand it to your coding agent
 
@@ -113,7 +113,7 @@ command; exit 1 = error or failed check):
 - `jevb read` prints the on-screen text; `jevb read <question>` returns the text that answers it.
 - `jevb snap` lists what jevb can click. Read it after a NO_MATCH, then rephrase.
 - Name visible text in checks: `check is a "Saved" toast shown?`, not `check did it work?`.
-- Use `--pace agent` for speed. Run `jevb stop` when done.
+- Pace is `fast` by default; use `--pace human` only to catch hover/focus bugs. Run `jevb stop` when done.
 ```
 
 `jevb update` installs the newest release later, and `jevb update --check`
@@ -167,14 +167,14 @@ Each design choice below came from a measurement:
 - **On demand.** The first command starts a local daemon. Chromium launches on
   first use and closes after 2 minutes idle. A session that expired fails
   with `SESSION_EXPIRED`, so a check can't pass against a blank page.
-- **Three paces.** `human` (the default) moves the mouse along curves, dwells
-  on hover, types key by key and pauses to read. This catches hover, focus
-  and debounce bugs, and makes recordings watchable. `agent` uses direct
-  clicks and `fill()`, and waits only on the page, including up to 3s for
-  network idle. `fast` (`--fast`) skips that wait: a step is done once the
-  page's text holds still for ~100ms (600ms at the least), and a click once the requests it
-  started have finished. Use it on live apps that poll or stream, where
-  network idle rarely comes.
+- **Three paces.** `fast` (the default) uses direct clicks and `fill()`. A
+  step is done once the page's text holds still for ~100ms (600ms at the
+  least), and a click once the requests it started have finished. `agent`
+  sends the same input but also waits up to 3s for network idle, which live
+  apps that poll or stream rarely reach. `human` moves the mouse along
+  curves, dwells on hover, types key by key and pauses to read. This
+  catches hover, focus and debounce bugs, and makes recordings watchable,
+  so it is the default with `JEVB_DEMO` or `JEVB_VIDEO`.
 
 ## Scenarios
 
@@ -182,7 +182,6 @@ A `.jevb` file has one step per line. The runner stops at the first step
 that throws, and exits non-zero if any check fails.
 
 ```
-pace agent
 open /login
 act go to create a new account
 check is a sign-up form with "Username" and "Email" fields shown?
@@ -195,7 +194,7 @@ shot out/signup.png
 
 ```bash
 jevb run examples/todomvc.jevb
-jevb run smoke.jevb --base http://localhost:5173 --pace agent
+jevb run smoke.jevb --base http://localhost:5173
 ```
 
 | Step | Does |
@@ -386,7 +385,7 @@ from (see [.env.example](.env.example)). Shell variables win.
 | Variable | |
 |---|---|
 | `TYPESAFEAI_API_KEY` (or `TYPESAFE_API_KEY`) | **required**, from [console.typesafe.ai/keys](https://console.typesafe.ai/keys) |
-| `JEVB_PACE` | `human` (default), `agent` or `fast` |
+| `JEVB_PACE` | `fast` (default), `agent` or `human`; recording (`JEVB_DEMO`, `JEVB_VIDEO`) defaults to `human` |
 | `JEVB_WAIT_MS` | how long checks and actions wait for the screen (4000; 0 = off) |
 | `JEVB_HEADED=1` · `JEVB_DEMO=1` · `JEVB_VIDEO=<dir>` | show the window · draw a cursor and a HUD of Jev's picks · record a `.webm` per session |
 | `JEVB_IDLE_MS` · `JEVB_DAEMON_IDLE_MS` · `JEVB_PORT` | browser idle close (2 min) · daemon exit (15 min) · daemon port (7788) |

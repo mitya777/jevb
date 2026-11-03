@@ -50,10 +50,11 @@ const USAGE = `jevb <command> [args] [--pace human|agent|fast] [--fast] [--sessi
                                    consecutive checks batch into one Jev call
                                    (--no-batch to compare)
 
-Pace: human (default) = curved mouse, hover dwell, per-key typing, reading
-pauses. agent = no pauses, waits for network idle (capped at 3s). fast (or
---fast) = agent without the network-idle wait: done once the page's text holds
-still ~100ms (600ms floor), and a click is done once the requests it started finish. Env: TYPESAFEAI_API_KEY (or ./.env),
+Pace: fast (default; --fast) = direct clicks and fill(), done once the page's
+text holds still ~100ms (600ms floor) and a click's requests finish. agent =
+same input, also waits for network idle (capped at 3s). human (default with
+JEVB_DEMO or JEVB_VIDEO) = curved mouse, hover dwell, per-key typing, reading
+pauses. Env: TYPESAFEAI_API_KEY (or ./.env),
 JEVB_PACE, JEVB_PORT, JEVB_IDLE_MS (chromium), JEVB_DAEMON_IDLE_MS, JEVB_HEADED=1,
 JEVB_DEMO=1 (visible cursor + Jev HUD), JEVB_VIDEO=<dir> (record .webm),
 JEVB_CDP_URL (attach to a running Chrome, e.g. from bin/jevb-chrome.sh; tabs open in

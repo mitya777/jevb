@@ -123,3 +123,16 @@ test('an action waits for its target to appear, within waitMs', async () => {
         assert.equal(await page.locator('button').last().textContent(), 'Done')
     } finally { process.env.JEVB_WAIT_MS = '0'; await b.shutdown() }
 })
+
+test('pace defaults to fast; recording defaults to human; an explicit pace wins', () => {
+    const saved = process.env.JEVB_PACE
+    delete process.env.JEVB_PACE
+    try {
+        assert.equal(new JevBrowser().pace, 'fast')
+        assert.equal(new JevBrowser({ demo: true }).pace, 'human')
+        assert.equal(new JevBrowser({ videoDir: '/tmp' }).pace, 'human')
+        assert.equal(new JevBrowser({ demo: true, pace: 'agent' }).pace, 'agent')
+        process.env.JEVB_PACE = 'agent'
+        assert.equal(new JevBrowser({ videoDir: '/tmp' }).pace, 'agent')
+    } finally { if (saved == null) delete process.env.JEVB_PACE; else process.env.JEVB_PACE = saved }
+})

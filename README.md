@@ -226,6 +226,7 @@ Top tabs shown?" scores about 0.8.
 | `snap` | the controls Jev chooses from |
 | `shot <path> [--full]` | screenshot |
 | `eval -- <js>` | run a function body in the page and print its result |
+| `send <file> [NAME=value …]` | replay a capture (`act/type --capture FILE`) without the page |
 | `run <file.jevb>` | run a scenario in-process (`--base`, `--pace`, `--no-batch`) |
 | `close` · `stop` · `status` | end a session · stop everything · show state |
 | `setup` · `update [--check]` · `version` | |
@@ -249,6 +250,49 @@ tabs open, so a page you're signed in to stays put; `close` closes its tab.
 Set `JEVB_CLOSE_TABS=1` to close jevb's tabs on idle and `stop` too.
 jevb opens its tabs in the background, so the browser window never jumps to
 the front while you work; set `JEVB_FOREGROUND=1` to focus them instead.
+
+## Capture once, replay without the page
+
+Once a flow works, most of its time is the page: rendering, waiting, Jev
+picking controls. The work itself is usually one request. `--capture`
+saves the requests an action sends; `send` replays them in the same
+browser profile with no page in the loop.
+
+```bash
+jevb type the email field --as EMAIL -- me@example.com
+jevb type the password field --as PASSWORD -- "$PW"
+jevb act log in --capture login.json
+jevb type the item field -- blue pen
+jevb act place the order --capture order.json
+
+jevb send login.json            # EMAIL, PASSWORD from the env
+jevb send order.json TEXT_3="red pen"
+```
+
+A capture file holds no secrets:
+
+- **Typed text becomes a parameter**, `{{NAME}}` (`--as NAME`, or `${NAME}`
+  in a scenario; otherwise `TEXT_n`). It matches only whole values (a JSON
+  string, a form field), so a typed `1` doesn't rewrite every 1.
+- **Tokens become references** to where the page keeps them: a meta tag,
+  a cookie, local or session storage, a global object. CSRF headers,
+  bearer tokens and form `authenticity_token`s are read fresh at send time.
+  A credential header with no such source becomes a parameter.
+- **Cookies stay in the browser.** The Cookie header is dropped; requests go
+  through the browser context's own request client, so its cookie jar
+  (HttpOnly too) applies and a login's Set-Cookie lands there.
+
+This works on any site whose action is one or more fetch/xhr or form-post
+requests: logins, forms, orders, admin actions, API reads. Third-party
+requests (analytics) are left out. `send` stops at the first 4xx/5xx and
+exits 1. It skips the UI by design, so it proves the server took the
+data, not that the page works. On the test shop, an order took ~1.2s
+through the page and 2–5ms with `send` (warm; the first send opens one
+background page to read tokens from).
+
+In a scenario: a `capture <file>` line before an `act`/`type`, and
+`send <file> NAME=value` (other parameters come from the env, like
+`${NAME}`, and are redacted from results).
 
 ## Phones and simulators
 

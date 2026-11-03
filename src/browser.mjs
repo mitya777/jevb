@@ -1,7 +1,9 @@
 // On-demand headless Chromium. Nothing launches until the first action needs
 // a page; after `idleMs` with no actions the browser is closed and relaunched
 // (fresh) on the next one. Sessions are named browser contexts.
+import fs from 'node:fs'
 import { chromium } from 'playwright-core'
+import * as capture from './capture.mjs'
 import { startCdpFilter } from './cdp-filter.mjs'
 import { OVERLAY } from './demo.mjs'
 import { judge, pickText, waitForChecks, waitUntil } from './judge.mjs'
@@ -35,7 +37,11 @@ export class JevBrowser {
         // Sessions killed by idle shutdown. Acting on one (other than open)
         // throws, so a check can't silently "pass" against a blank page.
         this.expired = new Set()
-        trackBusy(this, ACTIONS)
+        // Text typed per session, as named values a capture turns into
+        // parameters (see capture.mjs). In memory only.
+        this.typed = new Map()
+        this.helpers = new Map() // context -> origin -> page that send reads tokens from
+        trackBusy(this, [...ACTIONS, 'send'])
     }
 
     async ensureBrowser() {
@@ -77,6 +83,8 @@ export class JevBrowser {
             if (v) videos.push(await v.path().catch(() => null))
         }
         this.sessions.clear()
+        for (const byOrigin of this.helpers.values()) for (const p of byOrigin.values()) await p.close().catch(() => {})
+        this.helpers.clear()
         // For a CDP-attached browser, close() only disconnects; Chrome keeps running.
         if (b) { await b.close().catch(() => {}); this.log(`${this.cdpUrl ? 'detached' : 'chromium down'} (${reason})`) }
         for (const v of videos.filter(Boolean)) this.log(`video: ${v}`)
@@ -185,7 +193,7 @@ export class JevBrowser {
         return { page, locator: page.locator(`[data-jevb="${target.id}"]`), target, checks: checkResults }
     }
 
-    async act(intent, { session, pace: p, checks } = {}) {
+    async act(intent, { session, pace: p, checks, capture: file } = {}) {
         const pc = pace.resolvePace(p || this.pace)
         const { page, locator, target, checks: checkResults } = await this.find(intent, { session, checks })
         // Some clicks navigate a beat later (after an analytics call, say).
@@ -200,6 +208,7 @@ export class JevBrowser {
             setTimeout(() => resolve(false), 1_200)
         })
         const committed = page.waitForEvent('framenavigated', { predicate: (f) => f === page.mainFrame(), timeout: 15_000 }).catch(() => null)
+        const rec = file && await this.startCapture(page)
         await pace.click(page, locator, pc)
         await pace.settle(page, pc)
         if (await navigated) {
@@ -208,15 +217,20 @@ export class JevBrowser {
             await pace.settle(page, pc)
         }
         page.off('request', onRequest)
-        return { clicked: target, url: page.url(), checks: checkResults }
+        return { clicked: target, url: page.url(), checks: checkResults, ...(rec && { captured: await this.finishCapture(rec, file, session) }) }
     }
 
-    async type(intent, text, { session, pace: p, submit = false, checks } = {}) {
+    // as: the parameter name a later capture gives this text (default TEXT_n).
+    async type(intent, text, { session, pace: p, submit = false, checks, as, capture: file } = {}) {
         const pc = pace.resolvePace(p || this.pace)
         const { page, locator, target, checks: checkResults } = await this.find(intent, { session, checks })
         await pace.type(page, locator, text, pc)
+        const typed = (this.typed.get(session || 'default') || []).filter((t) => t.name !== as)
+        typed.push({ name: as || `TEXT_${typed.length + 1}`, value: text })
+        this.typed.set(session || 'default', typed)
+        const rec = file && submit && await this.startCapture(page)
         if (submit) { await pace.press(page, 'Enter', pc); await pace.settle(page, pc) }
-        return { typed: target, chars: text.length, checks: checkResults }
+        return { typed: target, chars: text.length, checks: checkResults, ...(rec && { captured: await this.finishCapture(rec, file, session) }) }
     }
 
     async press(key, { session, pace: p } = {}) {
@@ -280,7 +294,60 @@ export class JevBrowser {
         return { path }
     }
 
+    // ---- capture / send (see capture.mjs) ---------------------------------
+
+    // Token sources are read before the action: a login or checkout can
+    // rotate them, and the request carried the old ones.
+    async startCapture(page) {
+        const reqs = []
+        const onRequest = (r) => {
+            const type = r.resourceType()
+            if (type === 'fetch' || type === 'xhr' || (type === 'document' && r.method() !== 'GET')) reqs.push(r)
+        }
+        page.on('request', onRequest)
+        return { page, reqs, onRequest, at: page.url(), sources: await capture.tokenSources(page) }
+    }
+
+    async finishCapture({ page, reqs, onRequest, at, sources }, file, session) {
+        page.off('request', onRequest)
+        // Third-party calls (analytics, ads) aren't part of the action.
+        const site = (u) => { const h = new URL(u).hostname; return /^[\d.]+$|:/.test(h) || !h.includes('.') ? h : h.split('.').slice(-2).join('.') }
+        const own = reqs.filter((r) => site(r.url()) === site(at))
+        await Promise.all(own.map((r) => r.response().catch(() => null)))
+        const requests = await Promise.all(own.map(async (r) => ({ method: r.method(), url: r.url(), headers: await r.allHeaders(), body: r.postData() })))
+        const after = page.isClosed() ? [] : await capture.tokenSources(page)
+        const cap = capture.build({ page: at, requests, params: this.typed.get(session || 'default') || [], sources: [...sources, ...after] })
+        fs.writeFileSync(file, JSON.stringify(cap, null, 2) + '\n')
+        return { file, requests: cap.requests.map((r) => `${r.method} ${r.url}`), params: cap.params }
+    }
+
+    // Replays a capture in this session's browser context: its cookies, and
+    // tokens read fresh from a page on the captured origin (one opened in
+    // the background if no session is on it, and kept for the next send).
+    async send(file, { session, values } = {}) {
+        const cap = JSON.parse(fs.readFileSync(file, 'utf8'))
+        if (cap.jevb !== 'capture/1') throw new Error(`${file} is not a jevb capture`)
+        const context = (await this.page(session)).context()
+        const pageFor = async (origin) => {
+            const origin_ = (p) => { try { return new URL(p.url()).origin } catch { return null } }
+            for (const s of this.sessions.values()) if (!s.page.isClosed() && s.page.context() === context && origin_(s.page) === origin) return s.page
+            const byOrigin = this.helpers.get(context) || new Map()
+            this.helpers.set(context, byOrigin)
+            let p = byOrigin.get(origin)
+            if (!p || p.isClosed()) {
+                p = this.cdpUrl ? await this.newTab(this.browser, context) : await context.newPage()
+                await p.goto(new URL(cap.page).origin === origin ? cap.page : origin, { waitUntil: 'load', timeout: 45_000 })
+                byOrigin.set(origin, p)
+            }
+            return p
+        }
+        const t = Date.now()
+        const results = await capture.send(cap, { context, pageFor, values })
+        return { ok: results.every((r) => r.status < 400) && results.length === cap.requests.length, ms: Date.now() - t, results }
+    }
+
     async close({ session = 'default' } = {}) {
+        this.typed.delete(session)
         const s = this.sessions.get(session)
         if (s) { await (this.cdpUrl ? s.page.close() : s.context.close()).catch(() => {}); this.sessions.delete(session) }
         if (!this.sessions.size) await this.shutdown('last session closed')

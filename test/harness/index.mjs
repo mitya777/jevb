@@ -117,7 +117,9 @@ const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '
 // Serves test/fixtures over http (not file://: navigation, load and
 // networkidle behave like a real site). `/slow/<ms>/<file>` delays a file.
 export async function fixtures(dir = FIXTURES) {
+    const shop = shopApp()
     const server = http.createServer(async (req, res) => {
+        if (await shop.handle(req, res)) return
         let p = decodeURIComponent(new URL(req.url, 'http://x').pathname)
         const slow = p.match(/^\/slow\/(\d+)(\/.*)$/)
         if (slow) { await new Promise((r) => setTimeout(r, Number(slow[1]))); p = slow[2] }
@@ -128,7 +130,83 @@ export async function fixtures(dir = FIXTURES) {
     })
     await new Promise((r) => server.listen(0, '127.0.0.1', r))
     const base = `http://127.0.0.1:${server.address().port}/`
-    return { base, url: (p = '') => new URL(p, base).href, close: () => new Promise((r) => { server.closeAllConnections(); server.close(r) }) }
+    return { base, shop, url: (p = '') => new URL(p, base).href, close: () => new Promise((r) => { server.closeAllConnections(); server.close(r) }) }
+}
+
+// A small shop for capture/send: /shop.html logs in with a form post that
+// carries the page's CSRF meta token (sets an HttpOnly session cookie),
+// places orders as JSON with an X-CSRF-Token header, and lists them with a
+// bearer token the page keeps in localStorage. Every page load mints fresh
+// tokens. Placing an order also pings a third-party "analytics" host.
+function shopApp() {
+    const rand = () => Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)
+    const csrf = new Set(), keys = new Set(), sessions = new Map(), orders = []
+    const cookie = (req) => (req.headers.cookie || '').match(/(?:^|; )sid=([^;]+)/)?.[1]
+    const json = (res, code, o, headers = {}) => { res.writeHead(code, { 'content-type': 'application/json', ...headers }); res.end(JSON.stringify(o)) }
+    const body = async (req) => { let b = ''; for await (const c of req) b += c; return b }
+    const page = (host) => {
+        const token = rand(), key = rand()
+        csrf.add(token); keys.add(key)
+        const analytics = `http://${host.replace('127.0.0.1', 'localhost')}/api/collect`
+        return `<!doctype html><html><head><title>Shop</title><meta name="csrf-token" content="${token}"></head><body>
+<h1>Shop</h1>
+<input placeholder="Email"> <input type="password" placeholder="Password"> <button id="login">Log in</button>
+<input placeholder="Item"> <textarea placeholder="Note"></textarea> <button id="order">Place order</button>
+<button id="list">My orders</button>
+<p id="out"></p>
+<script>
+window.APP = { apiKey: '${key}' }
+localStorage.setItem('auth', JSON.stringify({ token: window.APP.apiKey }))
+const meta = () => document.querySelector('meta[name=csrf-token]').content
+const out = (t) => { document.getElementById('out').textContent = t }
+const $ = (s) => document.querySelector(s)
+$('#login').onclick = async () => {
+  const r = await fetch('/api/login', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ email: $('[placeholder=Email]').value, password: $('[type=password]').value, authenticity_token: meta() }) })
+  out(r.ok ? 'Logged in as ' + (await r.json()).email : 'Login failed')
+}
+$('#order').onclick = async () => {
+  fetch('${analytics}', { method: 'POST', mode: 'no-cors', body: 'event=order' }).catch(() => {})
+  const r = await fetch('/api/orders', { method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf-token': meta() },
+    body: JSON.stringify({ item: $('[placeholder=Item]').value, note: $('[placeholder=Note]').value, qty: 1 }) })
+  out(r.ok ? 'Order ' + (await r.json()).id + ' placed' : 'Order failed ' + r.status)
+}
+$('#list').onclick = async () => {
+  const r = await fetch('/api/orders', { headers: { authorization: 'Bearer ' + JSON.parse(localStorage.getItem('auth')).token } })
+  out(r.ok ? 'Orders: ' + (await r.json()).map((o) => o.item).join(', ') : 'List failed ' + r.status)
+}
+</script></body></html>`
+    }
+    return {
+        orders, sessions,
+        async handle(req, res) {
+            const url = new URL(req.url, 'http://x')
+            if (url.pathname === '/shop.html') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(page(req.headers.host)); return true }
+            if (!url.pathname.startsWith('/api/')) return false
+            if (url.pathname === '/api/collect') { await body(req); res.writeHead(204); res.end(); return true }
+            if (url.pathname === '/api/login' && req.method === 'POST') {
+                const f = new URLSearchParams(await body(req))
+                if (!csrf.has(f.get('authenticity_token'))) return json(res, 422, { error: 'bad csrf' }), true
+                if (f.get('password') !== 'pw-correct') return json(res, 401, { error: 'wrong password' }), true
+                const sid = rand()
+                sessions.set(sid, f.get('email'))
+                return json(res, 200, { email: f.get('email') }, { 'set-cookie': `sid=${sid}; HttpOnly; Path=/; SameSite=Lax` }), true
+            }
+            const user = sessions.get(cookie(req))
+            if (!user) return json(res, 401, { error: 'not logged in' }), true
+            if (url.pathname === '/api/orders' && req.method === 'POST') {
+                if (!csrf.has(req.headers['x-csrf-token'])) return json(res, 403, { error: 'bad csrf' }), true
+                const o = { id: orders.length + 1, user, ...JSON.parse(await body(req)) }
+                orders.push(o)
+                return json(res, 201, o), true
+            }
+            if (url.pathname === '/api/orders') {
+                if (!keys.has((req.headers.authorization || '').replace(/^Bearer /, ''))) return json(res, 401, { error: 'bad key' }), true
+                return json(res, 200, orders.filter((o) => o.user === user)), true
+            }
+            return json(res, 404, { error: 'no route' }), true
+        },
+    }
 }
 
 // A scenario file in a temp dir (runScenario reads from disk).

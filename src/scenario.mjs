@@ -11,6 +11,8 @@
 //   refute is an error message shown?           # passes if noul < 0.3
 //   shot out/after-post.png
 //   read what is the order number?   # the on-screen text that answers, verbatim
+//   capture out/order.json          # the next act/type saves the requests it sends
+//   send out/order.json ITEM=pen    # replay one, no page (see capture.mjs)
 //
 // Real phones (AWS Device Farm, or JEVB_APPIUM_URL): `device` / `app` lines
 // pick what the next `open` starts; `open` with no url launches the app.
@@ -82,6 +84,9 @@ export async function runScenario(file, { pace, baseUrl, batch = true, onStep = 
     const target = (arg) => (arg && baseUrl ? new URL(arg, baseUrl).href : arg || undefined)
     const results = []
     let failed = 0
+    // `capture <file>` applies to the next act/type (see capture.mjs).
+    let captureNext = null
+    const takeCapture = () => { const c = captureNext; captureNext = null; return c || undefined }
     const started = Date.now()
     let lastWorkEnd = started // end of the last non-wait step: trailing waits don't count
     const emit = (r) => { r = redact(r); results.push(r); onStep(r) }
@@ -121,10 +126,23 @@ export async function runScenario(file, { pace, baseUrl, batch = true, onStep = 
                         out = await b.open(target(s.arg), opts)
                         break
                     }
-                    case 'act': out = await b.act(s.arg, { checks }); break
+                    case 'capture': captureNext = path.resolve(s.arg); out = { capture: captureNext }; break
+                    case 'send': {
+                        const [file, ...kv] = s.arg.split(/\s+/)
+                        const values = Object.fromEntries(kv.map((x) => [x.slice(0, x.indexOf('=')), expand(x.slice(x.indexOf('=') + 1))]))
+                        // Parameters not given come from the env, as ${NAME} would:
+                        // a missing one fails here, and results never echo them.
+                        for (const p of JSON.parse(fs.readFileSync(path.resolve(file), 'utf8')).params || []) values[p] ??= expand(`\${${p}}`)
+                        out = await b.send(path.resolve(file), { values })
+                        if (!out.ok) throw Object.assign(new Error(`send ${file}: ${out.results.map((r) => r.status).join(', ')}`), { detail: out.results })
+                        break
+                    }
+                    case 'act': out = await b.act(s.arg, { checks, capture: takeCapture() }); break
                     case 'type': {
                         const [intent, text] = s.arg.split(/\s*=>\s*/)
-                        out = await b.type(intent, expand(text ?? ''), { checks })
+                        // type x => ${NAME}: a capture names the parameter NAME.
+                        const as = (text ?? '').trim().match(/^\$\{([A-Z0-9_]+)\}$/)?.[1]
+                        out = await b.type(intent, expand(text ?? ''), { checks, as, capture: takeCapture() })
                         break
                     }
                     case 'read': out = await b.readText({ question: s.arg || undefined }); break

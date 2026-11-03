@@ -23,6 +23,7 @@ const ACTIONS = {
     checks: (b, a) => b.checks(a.checks || [], a),
     snap: (b, a) => b.snap(a),
     read: (b, a) => b.readText(a),
+    send: (b, a) => { if (!b.send) throw new Error('send needs a browser session'); return b.send(a.file, a) },
     shot: (b, a) => b.screenshot(a.path, a),
     close: (b, a) => b.close(a),
     pace: (b, a, d) => { if (a.pace) b.pace = d.pace = a.pace; return { pace: b.pace } },

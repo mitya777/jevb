@@ -147,3 +147,34 @@ test('a credential body field with no source becomes a parameter; short look-ali
     assert.equal(cap.requests[1].body, '{"apiKey":"{{FIELD_APIKEY|json}}","password":"{{FIELD_PASSWORD|json}}","sort":"new"}')
     assert.doesNotMatch(JSON.stringify(cap), /abcdef0123456789xyz|sk_abc|hunter2/)
 })
+
+test('a redirected POST is captured once and replayed once', async () => {
+    const b = new JevBrowser({ pace: 'agent' })
+    try {
+        await b.open(site.url('shop.html'))
+        await b.type('the "Email" field', 'me@shop.test'); await b.type('the "Password" field', 'pw-correct')
+        await b.act('click "Log in"')
+        const r = await b.act('click "Reorder"', { capture: file('reorder.json') })
+        assert.deepEqual(r.captured.requests, [`POST ${site.url('api/reorder')}`], 'the 307 hop is not a second request')
+        const n = site.shop.orders.length
+        const s = await b.send(file('reorder.json'))
+        assert.equal(s.ok, true, JSON.stringify(s))
+        assert.equal(site.shop.orders.length, n + 1, 'one order, not two')
+    } finally { await b.shutdown() }
+})
+
+test('credential fields in multipart and spaced JSON bodies become parameters', () => {
+    const typed = [{ name: 'PASSWORD', value: 'typed-pw' }]
+    const mp = '--B\r\nContent-Disposition: form-data; name="user"\r\n\r\nme\r\n--B\r\nContent-Disposition: form-data; name="password"\r\n\r\ntyped-pw\r\n--B\r\nContent-Disposition: form-data; name="api_token"\r\n\r\ntok_0123456789abcdef\r\n--B--\r\n'
+    const cap = build({
+        page: 'https://x.test/', params: typed, sources: [],
+        requests: [
+            { method: 'POST', url: 'https://x.test/a', headers: { 'content-type': 'multipart/form-data; boundary=B' }, body: mp },
+            { method: 'POST', url: 'https://x.test/b', headers: { 'content-type': 'application/json' }, body: '{"user": "me", "password" : "autofilled-pw"}' },
+        ],
+    })
+    assert.match(cap.requests[0].body, /name="password"\r\n\r\n\{\{PASSWORD\|raw\}\}\r\n/)
+    assert.match(cap.requests[0].body, /name="api_token"\r\n\r\n\{\{FIELD_API_TOKEN\|raw\}\}\r\n/)
+    assert.equal(cap.requests[1].body, '{"user": "me", "password" : "{{FIELD_PASSWORD|json}}"}')
+    assert.doesNotMatch(JSON.stringify(cap), /typed-pw|tok_0123|autofilled-pw/)
+})

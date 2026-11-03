@@ -71,7 +71,7 @@ export async function tokenSources(page) {
 
 const bodyEncoding = (headers) => {
     const ct = Object.entries(headers).find(([k]) => k.toLowerCase() === 'content-type')?.[1] || ''
-    return /json/.test(ct) ? 'json' : /x-www-form-urlencoded/.test(ct) ? 'form' : 'raw'
+    return /json/.test(ct) ? 'json' : /x-www-form-urlencoded/.test(ct) ? 'form' : /multipart\/form-data/.test(ct) ? 'multipart' : 'raw'
 }
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -79,8 +79,9 @@ const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 // Replace each value (longest first) in s by its {{key|enc}}, trying the
 // encodings that context could hold. Tokens match anywhere (long, unique);
 // typed text (`whole`) only as a whole value: a JSON string, a form or
-// query field, or the entire string. A typed "1" mustn't rewrite every 1.
-function template(s, items, encs) {
+// query field, a multipart part, or the entire string. A typed "1" mustn't
+// rewrite every 1.
+function template(s, items, encs, multipart = false) {
     if (!s) return s
     for (const { key, value, whole } of items) {
         for (const enc of encs) {
@@ -91,6 +92,7 @@ function template(s, items, encs) {
             else if (s === e) s = ph
             else if (enc === 'json') s = s.split(`"${e}"`).join(`"${ph}"`)
             else if (enc === 'form' || enc === 'url') s = s.replace(new RegExp(`(?<=[=])${escapeRe(e)}(?=&|#|$)`, 'g'), ph)
+            else if (multipart && enc === 'raw') s = s.split(`\r\n\r\n${e}\r\n`).join(`\r\n\r\n${ph}\r\n`)
         }
     }
     return s
@@ -98,7 +100,7 @@ function template(s, items, encs) {
 
 // A credential field still holding a literal value (no source found for
 // it, e.g. a token only in a JS closure) becomes a parameter, so the file
-// never stores it: form fields and JSON string fields by name.
+// never stores it: form, multipart and JSON string fields by name.
 function secretFields(body, enc) {
     if (!body) return body
     const name = (k) => `FIELD_${k.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`
@@ -111,7 +113,10 @@ function secretFields(body, enc) {
         }).join('&')
     }
     if (enc === 'json') {
-        return body.replace(/"([^"\\]+)":"((?:[^"\\]|\\.)+)"/g, (m, k, v) => (secret(k, v) ? `"${k}":"{{${name(k)}|json}}"` : m))
+        return body.replace(/"([^"\\]+)"(\s*:\s*)"((?:[^"\\]|\\.)+)"/g, (m, k, sep, v) => (secret(k, v) ? `"${k}"${sep}"{{${name(k)}|json}}"` : m))
+    }
+    if (enc === 'multipart') {
+        return body.replace(/(name="([^"]+)"\r\n\r\n)([^\r]*)(?=\r\n)/g, (m, head, k, v) => (secret(k, v) ? `${head}{{${name(k)}|raw}}` : m))
     }
     return body
 }
@@ -140,7 +145,8 @@ export function build({ page, requests, params, sources }) {
             headers[k] = t
         }
         const enc = bodyEncoding(r.headers)
-        const body = secretFields(template(r.body ?? null, items, enc === 'json' ? ['json', 'raw'] : enc === 'form' ? ['form', 'url', 'raw'] : ['raw', 'json', 'url']), enc)
+        const encs = { json: ['json', 'raw'], form: ['form', 'url', 'raw'], multipart: ['raw'] }[enc] || ['raw', 'json', 'url']
+        const body = secretFields(template(r.body ?? null, items, encs, enc === 'multipart'), enc)
         const req = { method: r.method, url: template(r.url, items, ['url', 'form', 'raw']), headers, ...(body != null && { body }) }
         for (const m of JSON.stringify(req).matchAll(/\{\{([^|}]+)\|/g)) needed.add(m[1])
         return req
@@ -160,9 +166,9 @@ const fill = (s, values) => s?.replace(/\{\{([^|}]+)\|(\w+)\}\}/g, (_, key, enc)
     return ENCODERS[enc](values[key])
 })
 
-async function readSource(src, { context, pageFor }) {
+async function readSource(src, { context, pageFor, reload }) {
     if (src.from === 'cookie') return (await context.cookies(src.origin)).find((c) => c.name === src.name)?.value
-    const page = await pageFor(src.origin)
+    const page = await pageFor(src.origin, { reload })
     return page.evaluate((src) => {
         if (src.from === 'meta') return document.querySelector(`meta[name="${CSS.escape(src.name)}"]`)?.content
         if (src.from === 'input') return document.querySelector(`input[type=hidden][name="${CSS.escape(src.name)}"]`)?.value
@@ -176,20 +182,31 @@ async function readSource(src, { context, pageFor }) {
 // Replays a capture through the context's own request client (its cookie
 // jar, no CORS, no page load unless a token lives in a page). Stops at the
 // first 4xx/5xx. values: params by name; the env fills the rest.
+// A token page read earlier can go stale (Rails rotates its CSRF token at
+// login): on 401/403/419/422 the page is reloaded and the request tried once
+// more. The server refused the first one, so it can't run twice.
 export async function send(capture, { context, pageFor, values = {}, env = process.env }) {
     const vals = { ...values }
     for (const p of capture.params) vals[p] ??= env[p]
-    for (const [key, src] of Object.entries(capture.sources)) {
-        vals[key] = await readSource(src, { context, pageFor })
-        if (vals[key] == null) throw Object.assign(new Error(`token ${key} not found (${src.from} ${src.name || src.key} on ${src.origin}); capture again`), { code: 'SOURCE_GONE' })
+    const readAll = async (reload) => {
+        for (const [key, src] of Object.entries(capture.sources)) {
+            vals[key] = await readSource(src, { context, pageFor, reload })
+            if (vals[key] == null) throw Object.assign(new Error(`token ${key} not found (${src.from} ${src.name || src.key} on ${src.origin}); capture again`), { code: 'SOURCE_GONE' })
+        }
     }
+    await readAll(false)
+    const pageScoped = Object.values(capture.sources).some((s) => s.from !== 'cookie')
     const results = []
     for (const r of capture.requests) {
         const t = Date.now()
-        const headers = Object.fromEntries(Object.entries(r.headers).map(([k, v]) => [k, fill(v, vals)]))
-        const res = await context.request.fetch(fill(r.url, vals), {
-            method: r.method, headers, ...(r.body != null && { data: fill(r.body, vals) }), failOnStatusCode: false,
+        const once = () => context.request.fetch(fill(r.url, vals), {
+            method: r.method,
+            headers: Object.fromEntries(Object.entries(r.headers).map(([k, v]) => [k, fill(v, vals)])),
+            ...(r.body != null && { data: fill(r.body, vals) }),
+            failOnStatusCode: false,
         })
+        let res = await once()
+        if (pageScoped && [401, 403, 419, 422].includes(res.status())) { await readAll(true); res = await once() }
         const text = await res.text().catch(() => '')
         let json
         try { json = JSON.parse(text) } catch {}

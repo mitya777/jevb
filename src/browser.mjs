@@ -40,7 +40,7 @@ export class JevBrowser {
         // Text typed per session, as named values a capture turns into
         // parameters (see capture.mjs). In memory only.
         this.typed = new Map()
-        this.helpers = new Map() // context -> origin -> page that send reads tokens from
+        this.helpers = new Map() // context -> captured page url -> page send reads tokens from
         trackBusy(this, [...ACTIONS, 'send'])
     }
 
@@ -83,7 +83,7 @@ export class JevBrowser {
             if (v) videos.push(await v.path().catch(() => null))
         }
         this.sessions.clear()
-        for (const byOrigin of this.helpers.values()) for (const p of byOrigin.values()) await p.close().catch(() => {})
+        for (const byUrl of this.helpers.values()) for (const p of byUrl.values()) await p.close().catch(() => {})
         this.helpers.clear()
         // For a CDP-attached browser, close() only disconnects; Chrome keeps running.
         if (b) { await b.close().catch(() => {}); this.log(`${this.cdpUrl ? 'detached' : 'chromium down'} (${reason})`) }
@@ -317,11 +317,14 @@ export class JevBrowser {
             await new Promise((r) => setTimeout(r, 500))
         }
         page.off('request', onRequest)
-        // Third-party calls (analytics, ads) aren't part of the action.
-        const site = (u) => { const h = new URL(u).hostname; return /^[\d.]+$|:/.test(h) || !h.includes('.') ? h : h.split('.').slice(-2).join('.') }
-        const own = reqs.filter((r) => site(r.url()) === site(at))
-        await Promise.all(own.map((r) => r.response().catch(() => null)))
-        const requests = await Promise.all(own.map(async (r) => ({ method: r.method(), url: r.url(), headers: await r.allHeaders(), body: r.postData() })))
+        // Third-party calls (analytics, ads) aren't part of the action: the
+        // browser's own same-site verdict (public-suffix aware) decides.
+        // Redirect hops aren't either: send follows redirects itself, and
+        // replaying a hop too would run a POST twice.
+        const seen = await Promise.all(reqs.filter((r) => !r.redirectedFrom()).map(async (r) => ({ r, headers: await r.allHeaders() })))
+        const own = seen.filter(({ headers }) => headers['sec-fetch-site'] !== 'cross-site')
+        await Promise.all(own.map(({ r }) => r.response().catch(() => null)))
+        const requests = own.map(({ r, headers }) => ({ method: r.method(), url: r.url(), headers, body: r.postData() }))
         const after = page.isClosed() ? [] : await capture.tokenSources(page)
         const cap = capture.build({ page: at, requests, params: this.typed.get(session || 'default') || [], sources: [...sources, ...after] })
         fs.writeFileSync(file, JSON.stringify(cap, null, 2) + '\n')
@@ -329,23 +332,23 @@ export class JevBrowser {
     }
 
     // Replays a capture in this session's browser context: its cookies, and
-    // tokens read fresh from a page on the captured origin (one opened in
-    // the background if no session is on it, and kept for the next send).
+    // tokens read fresh from the captured page, opened once in the
+    // background and kept for the next send. Not a session's page: one on
+    // the same origin can be a result page without the token.
     async send(file, { session, values } = {}) {
         const cap = JSON.parse(fs.readFileSync(file, 'utf8'))
         if (cap.jevb !== 'capture/1') throw new Error(`${file} is not a jevb capture`)
         const context = (await this.page(session)).context()
-        const pageFor = async (origin) => {
-            const origin_ = (p) => { try { return new URL(p.url()).origin } catch { return null } }
-            for (const s of this.sessions.values()) if (!s.page.isClosed() && s.page.context() === context && origin_(s.page) === origin) return s.page
-            const byOrigin = this.helpers.get(context) || new Map()
-            this.helpers.set(context, byOrigin)
-            let p = byOrigin.get(origin)
+        const pageFor = async (origin, { reload } = {}) => {
+            const url = new URL(cap.page).origin === origin ? cap.page : origin
+            const byUrl = this.helpers.get(context) || new Map()
+            this.helpers.set(context, byUrl)
+            let p = byUrl.get(url)
             if (!p || p.isClosed()) {
                 p = this.cdpUrl ? await this.newTab(this.browser, context) : await context.newPage()
-                await p.goto(new URL(cap.page).origin === origin ? cap.page : origin, { waitUntil: 'load', timeout: 45_000 })
-                byOrigin.set(origin, p)
-            }
+                await p.goto(url, { waitUntil: 'load', timeout: 45_000 })
+                byUrl.set(url, p)
+            } else if (reload) await p.reload({ waitUntil: 'load', timeout: 45_000 })
             return p
         }
         const t = Date.now()

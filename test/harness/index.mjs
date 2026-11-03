@@ -153,6 +153,7 @@ function shopApp() {
 <input placeholder="Email"> <input type="password" placeholder="Password"> <button id="login">Log in</button>
 <input placeholder="Item"> <textarea placeholder="Note"></textarea> <button id="order">Place order</button>
 <button id="list">My orders</button>
+<button id="reorder">Reorder</button>
 <input placeholder="Search">
 <form method="post" action="/api/subscribe"><input type="hidden" name="authenticity_token" value="${formToken}"><input name="news_email" placeholder="Newsletter email"><button>Subscribe</button></form>
 <p id="out"></p>
@@ -174,6 +175,10 @@ $('#order').onclick = async () => {
   out(r.ok ? 'Order ' + (await r.json()).id + ' placed' : 'Order failed ' + r.status)
 }
 $('[placeholder=Search]').oninput = (e) => { fetch('/api/search?' + new URLSearchParams({ q: e.target.value })) }
+$('#reorder').onclick = async () => {
+  const r = await fetch('/api/reorder', { method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf-token': meta() }, body: JSON.stringify({ item: 'again', note: '', qty: 1 }) })
+  out(r.ok ? 'Reordered' : 'Reorder failed ' + r.status)
+}
 $('#list').onclick = async () => {
   const r = await fetch('/api/orders', { headers: { authorization: 'Bearer ' + JSON.parse(localStorage.getItem('auth')).token } })
   out(r.ok ? 'Orders: ' + (await r.json()).map((o) => o.item).join(', ') : 'List failed ' + r.status)
@@ -195,6 +200,7 @@ $('#list').onclick = async () => {
                 sessions.set(sid, f.get('email'))
                 return json(res, 200, { email: f.get('email') }, { 'set-cookie': `sid=${sid}; HttpOnly; Path=/; SameSite=Lax` }), true
             }
+            if (url.pathname === '/api/reorder') { res.writeHead(307, { location: '/api/orders' }); res.end(); return true }
             if (url.pathname === '/api/search') return json(res, 200, { q: url.searchParams.get('q') }), true
             if (url.pathname === '/api/subscribe' && req.method === 'POST') {
                 const f = new URLSearchParams(await body(req))

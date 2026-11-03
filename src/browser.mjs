@@ -300,26 +300,32 @@ export class JevBrowser {
     // Token sources are read before the action: a login or checkout can
     // rotate them, and the request carried the old ones.
     async startCapture(page) {
-        const reqs = []
+        const reqs = [], done = new Set()
         const onRequest = (r) => {
             const type = r.resourceType()
             if (type === 'fetch' || type === 'xhr' || (type === 'document' && r.method() !== 'GET')) reqs.push(r)
         }
+        const onDone = (r) => done.add(r)
         page.on('request', onRequest)
-        return { page, reqs, onRequest, at: page.url(), sources: await capture.tokenSources(page) }
+        page.on('requestfinished', onDone)
+        page.on('requestfailed', onDone)
+        return { page, reqs, done, onRequest, onDone, at: page.url(), sources: await capture.tokenSources(page) }
     }
 
     // lastPerEndpoint (type captures): keystrokes at human pace each send a
     // request with a prefix of the text (p, pr, pri...). Only the last one
     // per endpoint is the action, and the prefixes would leak the text.
-    async finishCapture({ page, reqs, onRequest, at, sources, lastPerEndpoint }, file, session) {
+    async finishCapture({ page, reqs, done, onRequest, onDone, at, sources, lastPerEndpoint }, file, session) {
         // Requests can start a beat after the action (debounced search,
-        // autosave): wait until none has started for 500ms (cap 3s).
-        for (let n = -1, t = Date.now(); n !== reqs.length && Date.now() - t < 3_000;) {
+        // autosave) or after another's response: record until all have
+        // finished and none has started for 500ms (cap 10s).
+        for (let n = -1, t = Date.now(); (n !== reqs.length || reqs.some((r) => !done.has(r))) && Date.now() - t < 10_000;) {
             n = reqs.length
             await new Promise((r) => setTimeout(r, 500))
         }
         page.off('request', onRequest)
+        page.off('requestfinished', onDone)
+        page.off('requestfailed', onDone)
         // Third-party calls (analytics, ads) aren't part of the action: the
         // browser's own same-site verdict (public-suffix aware) decides.
         // Redirect hops aren't either: send follows redirects itself, and

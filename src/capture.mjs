@@ -221,11 +221,12 @@ export async function send(capture, { context, pageFor, values = {}, env = proce
             if (vals[key] == null) throw Object.assign(new Error(`token ${key} not found (${src.from} ${src.name || src.key} on ${src.origin}); capture again`), { code: 'SOURCE_GONE' })
         }
     }
-    await readAll(false)
-    const pageScoped = Object.values(capture.sources).some((s) => s.from !== 'cookie')
+    const hasTokens = Object.keys(capture.sources).length > 0
     const results = []
     for (const r of capture.requests) {
         const t = Date.now()
+        // Before each request: the one before may have rotated a token.
+        await readAll(false)
         const once = () => context.request.fetch(fill(r.url, vals), {
             method: r.method,
             headers: Object.fromEntries(Object.entries(r.headers).map(([k, v]) => [k, fill(v, vals)])),
@@ -233,8 +234,9 @@ export async function send(capture, { context, pageFor, values = {}, env = proce
             failOnStatusCode: false,
         })
         let res = await once()
-        if (pageScoped && [401, 403, 419, 422].includes(res.status())) { await readAll(true); res = await once() }
+        if (hasTokens && [401, 403, 419, 422].includes(res.status())) { await res.dispose(); await readAll(true); res = await once() }
         const text = await res.text().catch(() => '')
+        await res.dispose() // else the context keeps every body until it closes
         let json
         try { json = JSON.parse(text) } catch {}
         results.push({ method: r.method, url: res.url(), status: res.status(), ms: Date.now() - t, ...(json !== undefined ? { json } : { body: text.slice(0, 2000) }) })

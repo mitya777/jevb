@@ -57,6 +57,9 @@ test('captures hold references, not secrets; a fresh browser replays them withou
         const bad = await b2.send(file('login.json'), { values: { EMAIL: 'me@shop.test', PASSWORD: 'nope' } })
         assert.equal(bad.ok, false)
         assert.equal(bad.results[0].status, 401)
+        const n0 = site.shop.orders.length
+        await assert.rejects(b2.send(file('order.json'), { values: { TEXT_3: 'only one of two' } }), { code: 'MISSING_PARAM' })
+        assert.equal(site.shop.orders.length, n0, 'nothing sent when a parameter is missing')
         await assert.rejects(b2.send(file('login.json'), { values: { EMAIL: 'me@shop.test' } }), { code: 'MISSING_PARAM' })
         const before = site.shop.orders.length
         const r1 = await b2.send(file('login.json'), { values: { EMAIL: 'me@shop.test', PASSWORD: 'pw-correct' } })
@@ -199,4 +202,19 @@ test('a human-pace live search keeps only the last request, so no prefix of the 
     const raw = fs.readFileSync(file('search-human.json'), 'utf8')
     assert.match(raw, /q=\{\{TEXT_1\|(form|url)\}\}/)
     assert.doesNotMatch(raw, /q=p|private/)
+})
+
+test('JSON keys stay keys; credentials in a URL query or Referer are not saved', () => {
+    const cap = build({
+        page: 'https://x.test/', params: [{ name: 'T', value: 'name' }], sources: [],
+        requests: [{
+            method: 'POST', url: 'https://x.test/api?api_key=abcdefghijklmnop&page=2',
+            headers: { 'content-type': 'application/json', referer: 'https://x.test/reset?reset_token=abcdefghijklmnop' },
+            body: '{"name":"name","tags":["name", "x"]}',
+        }],
+    })
+    assert.equal(cap.requests[0].body, '{"name":"{{T|json}}","tags":["{{T|json}}", "x"]}')
+    assert.equal(cap.requests[0].url, 'https://x.test/api?api_key={{FIELD_API_KEY|form}}&page=2')
+    assert.equal(cap.requests[0].headers.referer, 'https://x.test/reset')
+    assert.doesNotMatch(JSON.stringify(cap), /abcdefghijklmnop/)
 })

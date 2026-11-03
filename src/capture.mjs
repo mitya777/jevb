@@ -91,7 +91,7 @@ function template(s, items, encs, multipart = false) {
             const ph = `{{${key}|${enc}}}`
             if (!whole) s = s.split(e).join(ph)
             else if (s === e) s = ph
-            else if (enc === 'json') s = s.split(`"${e}"`).join(`"${ph}"`)
+            else if (enc === 'json') s = s.replace(new RegExp(`(?<=[:\\[,]\\s*)"${escapeRe(e)}"(?=\\s*[,}\\]])`, 'g'), `"${ph}"`) // values, not keys
             else if (enc === 'form' || enc === 'url') s = s.replace(new RegExp(`(?<=[=])${escapeRe(e)}(?=&|#|$)`, 'g'), ph)
             else if (multipart && enc === 'raw') s = s.split(`\r\n\r\n${e}\r\n`).join(`\r\n\r\n${ph}\r\n`)
         }
@@ -136,8 +136,11 @@ export function build({ page, requests, params, sources }) {
     const needed = new Set()
     const out = requests.map((r) => {
         const headers = {}
-        for (const [k, v] of Object.entries(r.headers)) {
+        for (let [k, v] of Object.entries(r.headers)) {
             if (DROP_HEADER.test(k)) continue
+            // A Referer's query can hold a credential (a reset link); the
+            // origin and path are all a server checks.
+            if (/^referer$/i.test(k)) { const u = new URL(v); v = u.origin + u.pathname }
             let t = template(v, items, ['raw', 'url'])
             if (SECRET_HEADER.test(k) && !t.includes('{{')) {
                 const name = `HEADER_${k.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`
@@ -148,7 +151,10 @@ export function build({ page, requests, params, sources }) {
         const enc = bodyEncoding(r.headers)
         const encs = { json: ['json', 'raw'], form: ['form', 'url', 'raw'], multipart: ['raw'] }[enc] || ['raw', 'json', 'url']
         const body = secretFields(template(r.body ?? null, items, encs, enc === 'multipart'), enc)
-        const req = { method: r.method, url: template(r.url, items, ['url', 'form', 'raw']), headers, ...(body != null && { body }) }
+        let url = template(r.url, items, ['url', 'form', 'raw'])
+        const q = url.indexOf('?')
+        if (q >= 0) url = url.slice(0, q + 1) + secretFields(url.slice(q + 1), 'form')
+        const req = { method: r.method, url, headers, ...(body != null && { body }) }
         for (const m of JSON.stringify(req).matchAll(/\{\{([^|}]+)\|/g)) needed.add(m[1])
         return req
     })
@@ -197,6 +203,10 @@ async function readSource(src, { context, pageFor, reload }) {
 export async function send(capture, { context, pageFor, values = {}, env = process.env }) {
     const vals = { ...values }
     for (const p of capture.params) vals[p] ??= env[p]
+    // All of them before anything is sent: a missing one for a later request
+    // mustn't leave an earlier POST done, to be repeated on the retry.
+    const missing = capture.params.filter((p) => vals[p] == null)
+    if (missing.length) throw Object.assign(new Error(`${missing.join(', ')} ${missing.length > 1 ? 'have' : 'has'} no value: pass NAME=... or set it in the env`), { code: 'MISSING_PARAM' })
     const readAll = async (reload) => {
         const reloaded = new Set() // once per page, so every token comes from one load
         for (const [key, src] of Object.entries(capture.sources)) {

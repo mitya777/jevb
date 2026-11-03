@@ -154,6 +154,7 @@ function shopApp() {
 <input placeholder="Item"> <textarea placeholder="Note"></textarea> <button id="order">Place order</button>
 <button id="list">My orders</button>
 <button id="reorder">Reorder</button>
+<button id="like">Like</button>
 <input placeholder="Search">
 <form method="post" action="/api/subscribe"><input type="hidden" name="authenticity_token" value="${formToken}"><input name="news_email" placeholder="Newsletter email"><button>Subscribe</button></form>
 <p id="out"></p>
@@ -179,6 +180,10 @@ $('#reorder').onclick = async () => {
   const r = await fetch('/api/reorder', { method: 'POST', headers: { 'content-type': 'application/json', 'x-csrf-token': meta() }, body: JSON.stringify({ item: 'again', note: '', qty: 1 }) })
   out(r.ok ? 'Reordered' : 'Reorder failed ' + r.status)
 }
+$('#like').onclick = async () => {
+  const r = await fetch('/api/like', { method: 'POST', headers: { 'x-xsrf-token': document.cookie.match(/xsrf=([^;]+)/)[1] } })
+  out(r.ok ? 'Liked' : 'Like failed ' + r.status)
+}
 $('#list').onclick = async () => {
   const r = await fetch('/api/orders', { headers: { authorization: 'Bearer ' + JSON.parse(localStorage.getItem('auth')).token } })
   out(r.ok ? 'Orders: ' + (await r.json()).map((o) => o.item).join(', ') : 'List failed ' + r.status)
@@ -189,7 +194,11 @@ $('#list').onclick = async () => {
         orders, sessions,
         async handle(req, res) {
             const url = new URL(req.url, 'http://x')
-            if (url.pathname === '/shop.html') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); res.end(page(req.headers.host)); return true }
+            if (url.pathname === '/shop.html') {
+                const xsrf = rand() // double-submit cookie: the page's script copies it into a header
+                res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'set-cookie': `xsrf=${xsrf}; Path=/; SameSite=Lax` })
+                res.end(page(req.headers.host)); return true
+            }
             if (!url.pathname.startsWith('/api/')) return false
             if (url.pathname === '/api/collect') { await body(req); res.writeHead(204); res.end(); return true }
             if (url.pathname === '/api/login' && req.method === 'POST') {
@@ -199,6 +208,10 @@ $('#list').onclick = async () => {
                 const sid = rand()
                 sessions.set(sid, f.get('email'))
                 return json(res, 200, { email: f.get('email') }, { 'set-cookie': `sid=${sid}; HttpOnly; Path=/; SameSite=Lax` }), true
+            }
+            if (url.pathname === '/api/like') {
+                const c = (req.headers.cookie || '').match(/(?:^|; )xsrf=([^;]+)/)?.[1]
+                return json(res, c && c === req.headers['x-xsrf-token'] ? 200 : 403, { liked: !!c && c === req.headers['x-xsrf-token'] }), true
             }
             if (url.pathname === '/api/reorder') { res.writeHead(307, { location: '/api/orders' }); res.end(); return true }
             if (url.pathname === '/api/search') return json(res, 200, { q: url.searchParams.get('q') }), true

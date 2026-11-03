@@ -218,3 +218,30 @@ test('JSON keys stay keys; credentials in a URL query or Referer are not saved',
     assert.equal(cap.requests[0].headers.referer, 'https://x.test/reset')
     assert.doesNotMatch(JSON.stringify(cap), /abcdefghijklmnop/)
 })
+
+test('form values match the way URLSearchParams encodes them', () => {
+    const v = 'private! (note) ~x'
+    const cap = build({
+        page: 'https://x.test/', params: [{ name: 'NOTE', value: v }], sources: [],
+        requests: [{ method: 'POST', url: `https://x.test/s?${new URLSearchParams({ q: v })}`, headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ note: v }).toString() }],
+    })
+    assert.equal(cap.requests[0].body, 'note={{NOTE|form}}')
+    assert.equal(cap.requests[0].url, 'https://x.test/s?q={{NOTE|form}}')
+    assert.deepEqual(cap.params, ['NOTE'])
+})
+
+test('a cookie-backed CSRF token is bootstrapped from the captured page in a fresh browser', async () => {
+    const b = new JevBrowser({ pace: 'agent' })
+    try {
+        await b.open(site.url('shop.html'))
+        await b.act('click "Like"', { capture: file('like.json') })
+    } finally { await b.shutdown() }
+    const cap = read('like.json')
+    assert.match(cap.requests[0].headers['x-xsrf-token'], /^\{\{@\d+\|raw\}\}$/)
+    assert.deepEqual(Object.values(cap.sources).map((s) => [s.from, s.name]), [['cookie', 'xsrf']])
+    const b2 = new JevBrowser({ pace: 'agent' })
+    try {
+        const r = await b2.send(file('like.json'))
+        assert.equal(r.ok, true, JSON.stringify(r))
+    } finally { await b2.shutdown() }
+})

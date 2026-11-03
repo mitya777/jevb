@@ -26,7 +26,7 @@ const ENCODERS = {
     raw: (v) => v,
     json: (v) => JSON.stringify(v).slice(1, -1),
     url: (v) => encodeURIComponent(v),
-    form: (v) => encodeURIComponent(v).replace(/%20/g, '+'),
+    form: (v) => new URLSearchParams({ v }).toString().slice(2), // as URLSearchParams and forms send it: ! ( ) ~ escaped, space as +
 }
 
 // Everything the page holds that looks like a token, with where it lives.
@@ -181,7 +181,11 @@ const fill = (s, values) => s?.replace(/\{\{([^|}]+)\|(\w+)\}\}/g, (_, key, enc)
 })
 
 async function readSource(src, { context, pageFor, reload }) {
-    if (src.from === 'cookie') return (await context.cookies(src.scope || src.origin)).find((c) => c.name === src.name)?.value
+    if (src.from === 'cookie') {
+        const read = async () => (await context.cookies(src.scope || src.origin)).find((c) => c.name === src.name)?.value
+        // A fresh browser has no CSRF cookie yet: the captured page sets it.
+        return (await read()) ?? (await pageFor(src.origin), await read())
+    }
     // sessionStorage belongs to one tab: read it from the session's own.
     const page = await pageFor(src.origin, { reload, tab: src.from === 'sessionStorage' })
     return page.evaluate((src) => {

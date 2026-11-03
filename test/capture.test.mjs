@@ -178,3 +178,25 @@ test('credential fields in multipart and spaced JSON bodies become parameters', 
     assert.equal(cap.requests[1].body, '{"user": "me", "password" : "{{FIELD_PASSWORD|json}}"}')
     assert.doesNotMatch(JSON.stringify(cap), /typed-pw|tok_0123|autofilled-pw/)
 })
+
+test('the stored page URL drops a query that carries a token', () => {
+    const cap = build({
+        page: 'https://x.test/reset?reset_token=abcdef0123456789&lang=en', params: [], sources: [],
+        requests: [{ method: 'POST', url: 'https://x.test/api/reset', headers: { 'content-type': 'application/json' }, body: '{"reset_token":"abcdef0123456789"}' }],
+    })
+    assert.equal(cap.page, 'https://x.test/reset')
+    assert.doesNotMatch(JSON.stringify(cap), /abcdef0123456789/)
+    assert.equal(build({ page: 'https://x.test/p?tab=2', params: [], sources: [], requests: [] }).page, 'https://x.test/p?tab=2')
+})
+
+test('a human-pace live search keeps only the last request, so no prefix of the text is saved', async () => {
+    const b = new JevBrowser({ pace: 'human' })
+    try {
+        await b.open(site.url('shop.html'))
+        const r = await b.type('the "Search" field', 'private', { capture: file('search-human.json') })
+        assert.equal(r.captured.requests.length, 1)
+    } finally { await b.shutdown() }
+    const raw = fs.readFileSync(file('search-human.json'), 'utf8')
+    assert.match(raw, /q=\{\{TEXT_1\|(form|url)\}\}/)
+    assert.doesNotMatch(raw, /q=p|private/)
+})

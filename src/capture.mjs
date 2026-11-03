@@ -62,9 +62,10 @@ export async function tokenSources(page) {
         }
         return out
     }, MIN_TOKEN).catch(() => [])
-    const origin = new URL(page.url()).origin
+    const { origin, pathname } = new URL(page.url())
     for (const c of await page.context().cookies(page.url())) {
-        if (c.value.length >= MIN_TOKEN) found.push({ value: c.value, src: { from: 'cookie', name: c.name } })
+        // scope: the URL it applies to (a cookie on /app isn't sent for /).
+        if (c.value.length >= MIN_TOKEN) found.push({ value: c.value, src: { from: 'cookie', name: c.name, scope: origin + pathname } })
     }
     return found.map((f) => ({ ...f, src: { ...f.src, origin } }))
 }
@@ -152,9 +153,16 @@ export function build({ page, requests, params, sources }) {
         return req
     })
     for (const x of srcItems) if (needed.has(x.key)) used.set(x.key, x.src)
+    // The page send reads tokens from. Its query and hash go if they hold a
+    // token, typed text or a credential-looking field (a reset link's token).
+    const u = new URL(page)
+    if (u.search || u.hash) {
+        const leaks = items.some((x) => x.value.length >= 3 && [page, decodeURIComponent(page)].some((s) => s.includes(x.value)))
+        if (leaks || [...u.searchParams.keys()].some((k) => SECRET_FIELD.test(k))) { u.search = ''; u.hash = '' }
+    }
     return {
         jevb: 'capture/1',
-        page,
+        page: u.href,
         params: [...needed].filter((k) => !k.startsWith('@')),
         sources: Object.fromEntries(used),
         requests: out,
@@ -167,8 +175,9 @@ const fill = (s, values) => s?.replace(/\{\{([^|}]+)\|(\w+)\}\}/g, (_, key, enc)
 })
 
 async function readSource(src, { context, pageFor, reload }) {
-    if (src.from === 'cookie') return (await context.cookies(src.origin)).find((c) => c.name === src.name)?.value
-    const page = await pageFor(src.origin, { reload })
+    if (src.from === 'cookie') return (await context.cookies(src.scope || src.origin)).find((c) => c.name === src.name)?.value
+    // sessionStorage belongs to one tab: read it from the session's own.
+    const page = await pageFor(src.origin, { reload, tab: src.from === 'sessionStorage' })
     return page.evaluate((src) => {
         if (src.from === 'meta') return document.querySelector(`meta[name="${CSS.escape(src.name)}"]`)?.content
         if (src.from === 'input') return document.querySelector(`input[type=hidden][name="${CSS.escape(src.name)}"]`)?.value
@@ -189,8 +198,12 @@ export async function send(capture, { context, pageFor, values = {}, env = proce
     const vals = { ...values }
     for (const p of capture.params) vals[p] ??= env[p]
     const readAll = async (reload) => {
+        const reloaded = new Set() // once per page, so every token comes from one load
         for (const [key, src] of Object.entries(capture.sources)) {
-            vals[key] = await readSource(src, { context, pageFor, reload })
+            const page = `${src.origin} ${src.from === 'sessionStorage' ? 'tab' : 'helper'}`
+            const first = reload && src.from !== 'cookie' && !reloaded.has(page)
+            if (first) reloaded.add(page)
+            vals[key] = await readSource(src, { context, pageFor, reload: first })
             if (vals[key] == null) throw Object.assign(new Error(`token ${key} not found (${src.from} ${src.name || src.key} on ${src.origin}); capture again`), { code: 'SOURCE_GONE' })
         }
     }

@@ -231,7 +231,7 @@ export class JevBrowser {
         const rec = file && await this.startCapture(page)
         await pace.type(page, locator, text, pc)
         if (submit) { await pace.press(page, 'Enter', pc); await pace.settle(page, pc) }
-        return { typed: target, chars: text.length, checks: checkResults, ...(rec && { captured: await this.finishCapture(rec, file, session) }) }
+        return { typed: target, chars: text.length, checks: checkResults, ...(rec && { captured: await this.finishCapture({ ...rec, lastPerEndpoint: true }, file, session) }) }
     }
 
     async press(key, { session, pace: p } = {}) {
@@ -309,7 +309,10 @@ export class JevBrowser {
         return { page, reqs, onRequest, at: page.url(), sources: await capture.tokenSources(page) }
     }
 
-    async finishCapture({ page, reqs, onRequest, at, sources }, file, session) {
+    // lastPerEndpoint (type captures): keystrokes at human pace each send a
+    // request with a prefix of the text (p, pr, pri...). Only the last one
+    // per endpoint is the action, and the prefixes would leak the text.
+    async finishCapture({ page, reqs, onRequest, at, sources, lastPerEndpoint }, file, session) {
         // Requests can start a beat after the action (debounced search,
         // autosave): wait until none has started for 500ms (cap 3s).
         for (let n = -1, t = Date.now(); n !== reqs.length && Date.now() - t < 3_000;) {
@@ -322,7 +325,11 @@ export class JevBrowser {
         // Redirect hops aren't either: send follows redirects itself, and
         // replaying a hop too would run a POST twice.
         const seen = await Promise.all(reqs.filter((r) => !r.redirectedFrom()).map(async (r) => ({ r, headers: await r.allHeaders() })))
-        const own = seen.filter(({ headers }) => headers['sec-fetch-site'] !== 'cross-site')
+        let own = seen.filter(({ headers }) => headers['sec-fetch-site'] !== 'cross-site')
+        if (lastPerEndpoint) {
+            const key = ({ r }) => `${r.method()} ${new URL(r.url()).origin}${new URL(r.url()).pathname}`
+            own = own.filter((x, i) => !own.slice(i + 1).some((y) => key(y) === key(x)))
+        }
         await Promise.all(own.map(({ r }) => r.response().catch(() => null)))
         const requests = own.map(({ r, headers }) => ({ method: r.method(), url: r.url(), headers, body: r.postData() }))
         const after = page.isClosed() ? [] : await capture.tokenSources(page)
@@ -339,7 +346,13 @@ export class JevBrowser {
         const cap = JSON.parse(fs.readFileSync(file, 'utf8'))
         if (cap.jevb !== 'capture/1') throw new Error(`${file} is not a jevb capture`)
         const context = (await this.page(session)).context()
-        const pageFor = async (origin, { reload } = {}) => {
+        const sessionPage = await this.page(session)
+        const pageFor = async (origin, { reload, tab } = {}) => {
+            if (tab) {
+                if (new URL(sessionPage.url()).origin !== origin) throw Object.assign(new Error(`a sessionStorage token lives in a tab on ${origin}; open it in this session first`), { code: 'SOURCE_GONE' })
+                if (reload) await sessionPage.reload({ waitUntil: 'load', timeout: 45_000 })
+                return sessionPage
+            }
             const url = new URL(cap.page).origin === origin ? cap.page : origin
             const byUrl = this.helpers.get(context) || new Map()
             this.helpers.set(context, byUrl)

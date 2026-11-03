@@ -275,15 +275,17 @@ A capture file holds no secrets:
   in a scenario; otherwise `TEXT_n`). It matches only whole values (a JSON
   string, a form field), so a typed `1` doesn't rewrite every 1.
 - **Tokens become references** to where the page keeps them: a meta tag,
-  a cookie, local or session storage, a global object. CSRF headers,
-  bearer tokens and form `authenticity_token`s are read fresh at send time.
-  A credential header with no such source becomes a parameter.
+  a hidden form input, a cookie, local or session storage, a global
+  object. CSRF headers, bearer tokens and form `authenticity_token`s are
+  read fresh at send time. A credential header or field with no such source
+  becomes a parameter instead of being written down.
 - **Cookies stay in the browser.** The Cookie header is dropped; requests go
   through the browser context's own request client, so its cookie jar
   (HttpOnly too) applies and a login's Set-Cookie lands there.
 
-This works on any site whose action is one or more fetch/xhr or form-post
-requests: logins, forms, orders, admin actions, API reads. Third-party
+`type --capture` records from before the first key, so live searches and
+autosaves are caught. This works on any site whose action is one or more
+fetch/xhr or form-post requests: logins, forms, orders, admin actions, API reads. Third-party
 requests (analytics) are left out. `send` stops at the first 4xx/5xx and
 exits 1. It skips the UI by design, so it proves the server took the
 data, not that the page works. On the test shop, an order took ~1.2s

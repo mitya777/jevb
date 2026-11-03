@@ -145,14 +145,16 @@ function shopApp() {
     const json = (res, code, o, headers = {}) => { res.writeHead(code, { 'content-type': 'application/json', ...headers }); res.end(JSON.stringify(o)) }
     const body = async (req) => { let b = ''; for await (const c of req) b += c; return b }
     const page = (host) => {
-        const token = rand(), key = rand()
-        csrf.add(token); keys.add(key)
+        const token = rand(), key = rand(), formToken = rand() // the form's own token, not the meta one
+        csrf.add(token); csrf.add(formToken); keys.add(key)
         const analytics = `http://${host.replace('127.0.0.1', 'localhost')}/api/collect`
         return `<!doctype html><html><head><title>Shop</title><meta name="csrf-token" content="${token}"></head><body>
 <h1>Shop</h1>
 <input placeholder="Email"> <input type="password" placeholder="Password"> <button id="login">Log in</button>
 <input placeholder="Item"> <textarea placeholder="Note"></textarea> <button id="order">Place order</button>
 <button id="list">My orders</button>
+<input placeholder="Search">
+<form method="post" action="/api/subscribe"><input type="hidden" name="authenticity_token" value="${formToken}"><input name="news_email" placeholder="Newsletter email"><button>Subscribe</button></form>
 <p id="out"></p>
 <script>
 window.APP = { apiKey: '${key}' }
@@ -171,6 +173,7 @@ $('#order').onclick = async () => {
     body: JSON.stringify({ item: $('[placeholder=Item]').value, note: $('[placeholder=Note]').value, qty: 1 }) })
   out(r.ok ? 'Order ' + (await r.json()).id + ' placed' : 'Order failed ' + r.status)
 }
+$('[placeholder=Search]').oninput = (e) => { fetch('/api/search?' + new URLSearchParams({ q: e.target.value })) }
 $('#list').onclick = async () => {
   const r = await fetch('/api/orders', { headers: { authorization: 'Bearer ' + JSON.parse(localStorage.getItem('auth')).token } })
   out(r.ok ? 'Orders: ' + (await r.json()).map((o) => o.item).join(', ') : 'List failed ' + r.status)
@@ -191,6 +194,12 @@ $('#list').onclick = async () => {
                 const sid = rand()
                 sessions.set(sid, f.get('email'))
                 return json(res, 200, { email: f.get('email') }, { 'set-cookie': `sid=${sid}; HttpOnly; Path=/; SameSite=Lax` }), true
+            }
+            if (url.pathname === '/api/search') return json(res, 200, { q: url.searchParams.get('q') }), true
+            if (url.pathname === '/api/subscribe' && req.method === 'POST') {
+                const f = new URLSearchParams(await body(req))
+                if (!csrf.has(f.get('authenticity_token'))) return json(res, 422, { error: 'bad csrf' }), true
+                res.writeHead(200, { 'content-type': 'text/html' }); res.end(`<p>Subscribed ${f.get('news_email')}</p>`); return true
             }
             const user = sessions.get(cookie(req))
             if (!user) return json(res, 401, { error: 'not logged in' }), true

@@ -5,8 +5,8 @@
 //   - text typed earlier in the session becomes a named parameter,
 //     {{NAME|enc}}, filled at send time from arguments or the environment;
 //   - tokens the request carried (CSRF, bearer, form authenticity tokens)
-//     are traced to where the page keeps them (a meta tag, a cookie, local or
-//     session storage, a global object) and become {{@n|enc}}, read fresh
+//     are traced to where the page keeps them (a meta tag, a hidden input, a
+//     cookie, local or session storage, a global object) and become {{@n|enc}}, read fresh
 //     from that place at send time;
 //   - the Cookie header is dropped: the browser context's cookie jar sends
 //     the current ones.
@@ -18,6 +18,8 @@ const MIN_TOKEN = 12
 // Header names whose values are credentials. One left as a literal after
 // templating becomes a parameter instead of being written to the file.
 const SECRET_HEADER = /auth|token|csrf|xsrf|session|secret|key|signature/i
+// Body fields the same way (plus passwords); see secretFields().
+const SECRET_FIELD = /auth|token|csrf|xsrf|session|secret|key|signature|passw/i
 const DROP_HEADER = /^(:|cookie$|host$|content-length$|connection$|accept-encoding$)/i
 
 const ENCODERS = {
@@ -35,6 +37,7 @@ export async function tokenSources(page) {
         // Tokens have no spaces and aren't URLs (window.origin is a string global).
         const add = (value, src) => { if (typeof value === 'string' && value.length >= min && !/\s|^[a-z]+:\/\//i.test(value)) out.push({ value, src }) }
         for (const m of document.querySelectorAll('meta[name][content]')) add(m.content, { from: 'meta', name: m.getAttribute('name') })
+        for (const i of document.querySelectorAll('input[type=hidden][name]')) add(i.value, { from: 'input', name: i.name })
         for (const [kind, store] of [['localStorage', localStorage], ['sessionStorage', sessionStorage]]) {
             for (let i = 0; i < store.length; i++) {
                 const key = store.key(i), v = store.getItem(key)
@@ -93,6 +96,26 @@ function template(s, items, encs) {
     return s
 }
 
+// A credential field still holding a literal value (no source found for
+// it, e.g. a token only in a JS closure) becomes a parameter, so the file
+// never stores it: form fields and JSON string fields by name.
+function secretFields(body, enc) {
+    if (!body) return body
+    const name = (k) => `FIELD_${k.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}`
+    // Token-length values only (a "keyword=shoes" field isn't one), or any password.
+    const secret = (k, v) => v && !v.includes('{{') && SECRET_FIELD.test(k) && (v.length >= MIN_TOKEN || /passw/i.test(k))
+    if (enc === 'form') {
+        return body.split('&').map((kv) => {
+            const i = kv.indexOf('='), k = decodeURIComponent(kv.slice(0, i).replace(/\+/g, ' ')), v = kv.slice(i + 1)
+            return i > 0 && secret(k, v) ? `${kv.slice(0, i)}={{${name(k)}|form}}` : kv
+        }).join('&')
+    }
+    if (enc === 'json') {
+        return body.replace(/"([^"\\]+)":"((?:[^"\\]|\\.)+)"/g, (m, k, v) => (secret(k, v) ? `"${k}":"{{${name(k)}|json}}"` : m))
+    }
+    return body
+}
+
 // params: [{ name, value }] typed this session. sources: tokenSources().
 // requests: [{ method, url, headers, body }] as the page sent them.
 export function build({ page, requests, params, sources }) {
@@ -117,8 +140,8 @@ export function build({ page, requests, params, sources }) {
             headers[k] = t
         }
         const enc = bodyEncoding(r.headers)
-        const body = template(r.body ?? null, items, enc === 'json' ? ['json', 'raw'] : enc === 'form' ? ['form', 'url', 'raw'] : ['raw', 'json', 'url'])
-        const req = { method: r.method, url: template(r.url, items, ['url', 'raw']), headers, ...(body != null && { body }) }
+        const body = secretFields(template(r.body ?? null, items, enc === 'json' ? ['json', 'raw'] : enc === 'form' ? ['form', 'url', 'raw'] : ['raw', 'json', 'url']), enc)
+        const req = { method: r.method, url: template(r.url, items, ['url', 'form', 'raw']), headers, ...(body != null && { body }) }
         for (const m of JSON.stringify(req).matchAll(/\{\{([^|}]+)\|/g)) needed.add(m[1])
         return req
     })
@@ -142,6 +165,7 @@ async function readSource(src, { context, pageFor }) {
     const page = await pageFor(src.origin)
     return page.evaluate((src) => {
         if (src.from === 'meta') return document.querySelector(`meta[name="${CSS.escape(src.name)}"]`)?.content
+        if (src.from === 'input') return document.querySelector(`input[type=hidden][name="${CSS.escape(src.name)}"]`)?.value
         let v = src.from === 'global' ? window[src.name] : (src.from === 'localStorage' ? localStorage : sessionStorage).getItem(src.key)
         if (src.path == null) return v
         if (typeof v === 'string') { try { v = JSON.parse(v) } catch { return undefined } }

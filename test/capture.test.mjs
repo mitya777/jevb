@@ -111,3 +111,39 @@ test('scenarios: capture names ${NAME} parameters; send fills them from the env'
     const r3 = await run(`send ${out} SHOP_PASSWORD=wrong`)
     assert.equal(r3.failed, 1, 'a 401 fails the step')
 })
+
+test('a classic form post with a hidden token, and a live search while typing', async () => {
+    const b = new JevBrowser({ pace: 'agent' })
+    try {
+        await b.open(site.url('shop.html'))
+        const search = await b.type('the "Search" field', 'blue pen', { capture: file('search.json') })
+        assert.ok(search.captured.requests.length >= 1, 'requests sent while typing are captured')
+        assert.match(read('search.json').requests.at(-1).url, /\/api\/search\?q=\{\{TEXT_1\|form\}\}$/)
+        await b.type('the "Newsletter email" field', 'news@shop.test', { as: 'NEWS' })
+        await b.act('click "Subscribe"', { capture: file('subscribe.json') })
+    } finally { await b.shutdown() }
+    const s = read('subscribe.json')
+    assert.match(s.requests[0].body, /^authenticity_token=\{\{@\d+\|form\}\}&news_email=\{\{NEWS\|form\}\}$/)
+    assert.deepEqual(Object.values(s.sources).map((x) => [x.from, x.name]), [['input', 'authenticity_token']])
+    const b2 = new JevBrowser({ pace: 'agent' })
+    try {
+        const r = await b2.send(file('subscribe.json'), { values: { NEWS: 'again@shop.test' } })
+        assert.equal(r.ok, true, JSON.stringify(r))
+        assert.match(r.results[0].body, /Subscribed again@shop\.test/)
+        const q = await b2.send(file('search.json'), { values: { TEXT_1: 'red ink' } })
+        assert.deepEqual(q.results.at(-1).json, { q: 'red ink' })
+    } finally { await b2.shutdown() }
+})
+
+test('a credential body field with no source becomes a parameter; short look-alikes stay', () => {
+    const cap = build({
+        page: 'https://x.test/', params: [], sources: [],
+        requests: [
+            { method: 'POST', url: 'https://x.test/a', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: 'csrf_token=abcdef0123456789xyz&keyword=shoes&qty=2' },
+            { method: 'POST', url: 'https://x.test/b', headers: { 'content-type': 'application/json' }, body: '{"apiKey":"sk_abcdefghijklmnop","password":"hunter2","sort":"new"}' },
+        ],
+    })
+    assert.equal(cap.requests[0].body, 'csrf_token={{FIELD_CSRF_TOKEN|form}}&keyword=shoes&qty=2')
+    assert.equal(cap.requests[1].body, '{"apiKey":"{{FIELD_APIKEY|json}}","password":"{{FIELD_PASSWORD|json}}","sort":"new"}')
+    assert.doesNotMatch(JSON.stringify(cap), /abcdef0123456789xyz|sk_abc|hunter2/)
+})

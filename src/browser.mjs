@@ -224,11 +224,12 @@ export class JevBrowser {
     async type(intent, text, { session, pace: p, submit = false, checks, as, capture: file } = {}) {
         const pc = pace.resolvePace(p || this.pace)
         const { page, locator, target, checks: checkResults } = await this.find(intent, { session, checks })
-        await pace.type(page, locator, text, pc)
         const typed = (this.typed.get(session || 'default') || []).filter((t) => t.name !== as)
         typed.push({ name: as || `TEXT_${typed.length + 1}`, value: text })
         this.typed.set(session || 'default', typed)
-        const rec = file && submit && await this.startCapture(page)
+        // Before typing: a live search or autosave sends while keys go in.
+        const rec = file && await this.startCapture(page)
+        await pace.type(page, locator, text, pc)
         if (submit) { await pace.press(page, 'Enter', pc); await pace.settle(page, pc) }
         return { typed: target, chars: text.length, checks: checkResults, ...(rec && { captured: await this.finishCapture(rec, file, session) }) }
     }
@@ -309,6 +310,12 @@ export class JevBrowser {
     }
 
     async finishCapture({ page, reqs, onRequest, at, sources }, file, session) {
+        // Requests can start a beat after the action (debounced search,
+        // autosave): wait until none has started for 500ms (cap 3s).
+        for (let n = -1, t = Date.now(); n !== reqs.length && Date.now() - t < 3_000;) {
+            n = reqs.length
+            await new Promise((r) => setTimeout(r, 500))
+        }
         page.off('request', onRequest)
         // Third-party calls (analytics, ads) aren't part of the action.
         const site = (u) => { const h = new URL(u).hostname; return /^[\d.]+$|:/.test(h) || !h.includes('.') ? h : h.split('.').slice(-2).join('.') }

@@ -210,14 +210,14 @@ export class JevBrowser {
             page.on('request', onRequest)
             if (pc !== 'fast') setTimeout(() => resolve(false), 1_200)
         })
-        const quiet = async () => {
-            await sleep(500)
+        const drain = async () => {
             for (let calm = 0; Date.now() - clickedAt < 5_000; await sleep(50)) {
                 calm = pending.size ? 0 : calm + 1
                 if (calm >= 2) return false
             }
             return false
         }
+        const quiet = () => sleep(500).then(drain)
         if (pc === 'fast') { page.on('requestfinished', onDone); page.on('requestfailed', onDone) }
         const committed = page.waitForEvent('framenavigated', { predicate: (f) => f === page.mainFrame(), timeout: 15_000 }).catch(() => null)
         await pace.click(page, locator, pc)
@@ -228,7 +228,10 @@ export class JevBrowser {
             await committed
             await page.waitForLoadState('load', { timeout: 15_000 }).catch(() => {})
             await pace.settle(page, pc)
-        } else if (pc === 'fast' && fetched) await pace.textSettled(page)
+        } else if (pc === 'fast') {
+            await drain() // a fetch can start after quiet() ended, during settle
+            if (fetched) await pace.textSettled(page)
+        }
         page.off('request', onRequest)
         page.off('requestfinished', onDone)
         page.off('requestfailed', onDone)

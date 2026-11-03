@@ -155,3 +155,21 @@ test('fast act waits for the fetch its click started, then for the render', asyn
         assert.equal(c.pass, true)
     } finally { await b.shutdown() }
 })
+
+// A fetch that starts after the quiet check passed, while the page settles.
+test('fast act also waits for a fetch that starts late', async () => {
+    const b = new JevBrowser({ pace: 'fast' })
+    try {
+        await b.open(site.url('next.html'))
+        const page = await b.page()
+        await page.evaluate(() => {
+            const btn = document.createElement('button')
+            btn.textContent = 'Load later'
+            btn.onclick = () => setTimeout(() => fetch('/slow/1200/next.html').then(() => document.body.insertAdjacentHTML('beforeend', '<p>Late loaded</p>')), 580)
+            document.body.append(btn)
+        })
+        await b.act('click "Load later"')
+        const [c] = await b.checks([{ question: 'is "Late loaded" shown?' }], { waitMs: 0 })
+        assert.equal(c.pass, true)
+    } finally { await b.shutdown() }
+})

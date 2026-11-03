@@ -36,3 +36,12 @@ test('status, snap and phone opens', () => {
     w.record('check', { question: 'is this a login page?', threshold: 0.9 })
     assert.equal(w.record('scroll', { dy: 'end' }).scenario, 'device pixel 9\napp a.apk\nopen\ncheck@0.9 is this a login page?\nscroll end')
 })
+
+test('eval, launch and close end the run', () => {
+    const w = new Watch({ now: clock() })
+    w.record('open', { url: 'https://x.test/' })
+    w.record('eval', { script: 'localStorage.x = 1' })
+    w.record('act', { intent: 'click Save' })
+    assert.equal(w.record('press', { key: 'Enter' }), null, 'only 2 steps since the eval')
+    assert.equal(w.record('press', { key: 'Enter' }).scenario, 'act click Save\npress Enter\npress Enter')
+})

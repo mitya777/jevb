@@ -34,6 +34,9 @@ export class Watch {
     // Call after an action succeeds. Returns a hint object or null.
     record(name, a = {}) {
         const key = a.session || 'default'
+        // Steps a scenario can't replay end the run: a draft that skipped
+        // an eval's setup wouldn't reproduce what worked.
+        if (['eval', 'launch', 'close'].includes(name)) { this.runs.delete(key); return null }
         let run = this.runs.get(key)
         const t = this.now()
         if (!run || t - run.at > this.gapMs) run = { steps: 0, lines: [], texts: 0 }

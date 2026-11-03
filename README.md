@@ -167,10 +167,14 @@ Each design choice below came from a measurement:
 - **On demand.** The first command starts a local daemon. Chromium launches on
   first use and closes after 2 minutes idle. A session that expired fails
   with `SESSION_EXPIRED`, so a check can't pass against a blank page.
-- **Two paces.** `human` (the default) moves the mouse along curves, dwells
+- **Three paces.** `human` (the default) moves the mouse along curves, dwells
   on hover, types key by key and pauses to read. This catches hover, focus
   and debounce bugs, and makes recordings watchable. `agent` uses direct
-  clicks and `fill()`, and waits only on the page.
+  clicks and `fill()`, and waits only on the page, including up to 3s for
+  network idle. `fast` (`--fast`) skips that wait: a step is done once the
+  page's text holds still for ~100ms, and a click once the requests it
+  started have finished. Use it on live apps that poll or stream, where
+  network idle rarely comes.
 
 ## Scenarios
 
@@ -205,7 +209,7 @@ jevb run smoke.jevb --base http://localhost:5173 --pace agent
 | `read <question>` | the on-screen text that answers, verbatim, in the results |
 | `check <question>` | pass if Jev's noul ≥ 0.7 (`check@0.9` sets the bar) |
 | `refute <question>` | pass if noul < 0.3 |
-| `wait <ms>` · `shot <file>` · `pace human\|agent` | |
+| `wait <ms>` · `shot <file>` · `pace human\|agent\|fast` | |
 | `device <name>` · `app <file\|id>` | the next `open` starts a phone |
 
 Write checks about text that's visible. Jev reads text, not pixels: "is a
@@ -231,7 +235,7 @@ Top tabs shown?" scores about 0.8.
 | `setup` · `update [--check]` · `version` | |
 
 All commands take `--session NAME` for parallel isolated sessions and
-`--pace human|agent`. From code: `import { JevBrowser, JevDevice, runScenario } from 'jevb'`.
+`--pace human|agent|fast` (`--fast` for short). From code: `import { JevBrowser, JevDevice, runScenario } from 'jevb'`.
 
 ## Signed-in flows
 
@@ -382,7 +386,7 @@ from (see [.env.example](.env.example)). Shell variables win.
 | Variable | |
 |---|---|
 | `TYPESAFEAI_API_KEY` (or `TYPESAFE_API_KEY`) | **required**, from [console.typesafe.ai/keys](https://console.typesafe.ai/keys) |
-| `JEVB_PACE` | `human` (default) or `agent` |
+| `JEVB_PACE` | `human` (default), `agent` or `fast` |
 | `JEVB_WAIT_MS` | how long checks and actions wait for the screen (4000; 0 = off) |
 | `JEVB_HEADED=1` · `JEVB_DEMO=1` · `JEVB_VIDEO=<dir>` | show the window · draw a cursor and a HUD of Jev's picks · record a `.webm` per session |
 | `JEVB_IDLE_MS` · `JEVB_DAEMON_IDLE_MS` · `JEVB_PORT` | browser idle close (2 min) · daemon exit (15 min) · daemon port (7788) |

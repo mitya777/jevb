@@ -79,11 +79,13 @@ test('"first"/"last" reply resolve by position on a real page', async () => {
     assert.equal(r.failed, 0, JSON.stringify(r.results, null, 1))
 })
 
-test('act waits out a navigation that starts a beat after the click', async () => {
-    const r = await run('open flow.html\nact click "Continue to next page"\ncheck is "Welcome to the next page" shown?')
-    assert.equal(r.failed, 0, JSON.stringify(r.results, null, 1))
-    assert.match(byLine(r.results)['act click "Continue to next page"'].url, /next\.html$/)
-})
+for (const pace of ['agent', 'fast']) {
+    test(`${pace}: act waits out a navigation that starts a beat after the click`, async () => {
+        const r = await run('open flow.html\nact click "Continue to next page"\ncheck is "Welcome to the next page" shown?', { pace })
+        assert.equal(r.failed, 0, JSON.stringify(r.results, null, 1))
+        assert.match(byLine(r.results)['act click "Continue to next page"'].url, /next\.html$/)
+    })
+}
 
 test('${SECRET} is typed but never echoed back in results', async () => {
     process.env.JEVB_TEST_SECRET = 'sekrit-value-123'

@@ -18,6 +18,7 @@ const CDP_URL = process.env.JEVB_CDP_URL || null
 // `close` still closes its tab. JEVB_CLOSE_TABS=1 closes them on detach too.
 const CLOSE_TABS = process.env.JEVB_CLOSE_TABS === '1'
 const FOREGROUND = process.env.JEVB_FOREGROUND === '1'
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 export class JevBrowser {
     constructor({ idleMs = DEFAULT_IDLE_MS, pace: p, headless = process.env.JEVB_HEADED !== '1',
@@ -193,21 +194,43 @@ export class JevBrowser {
         // A navigation *request* comes before the new document commits, and
         // load-state waits in between resolve against the old document, so
         // wait for the main frame to actually navigate before settling.
-        let onRequest
+        // Fast pace ends the window early, once the fetches the click started
+        // have finished and the network has been quiet for ~100ms. Not before
+        // 500ms: a click handler's timer that navigates (no request first) is
+        // invisible until it fires.
+        const pending = new Set()
+        let onRequest, clickedAt
+        const onDone = (req) => pending.delete(req)
         const navigated = new Promise((resolve) => {
-            onRequest = (req) => req.isNavigationRequest() && req.frame() === page.mainFrame() && resolve(true)
+            onRequest = (req) => {
+                if (req.isNavigationRequest() && req.frame() === page.mainFrame()) resolve(true)
+                else if (['fetch', 'xhr', 'ping', 'beacon'].includes(req.resourceType())) pending.add(req)
+            }
             page.on('request', onRequest)
             setTimeout(() => resolve(false), 1_200)
         })
+        const quiet = async () => {
+            await sleep(500)
+            for (let calm = 0; Date.now() - clickedAt < 1_200; await sleep(50)) {
+                calm = pending.size ? 0 : calm + 1
+                if (calm >= 2) return false
+            }
+            return false
+        }
+        if (pc === 'fast') { page.on('requestfinished', onDone); page.on('requestfailed', onDone) }
         const committed = page.waitForEvent('framenavigated', { predicate: (f) => f === page.mainFrame(), timeout: 15_000 }).catch(() => null)
         await pace.click(page, locator, pc)
+        clickedAt = Date.now()
+        const nav = pc === 'fast' ? Promise.race([navigated, quiet()]) : navigated
         await pace.settle(page, pc)
-        if (await navigated) {
+        if (await nav) {
             await committed
             await page.waitForLoadState('load', { timeout: 15_000 }).catch(() => {})
             await pace.settle(page, pc)
         }
         page.off('request', onRequest)
+        page.off('requestfinished', onDone)
+        page.off('requestfailed', onDone)
         return { clicked: target, url: page.url(), checks: checkResults }
     }
 

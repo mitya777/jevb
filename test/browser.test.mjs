@@ -51,7 +51,7 @@ test('sessions are isolated browser contexts', async () => {
     } finally { await b.shutdown() }
 })
 
-for (const pace of ['agent', 'human']) {
+for (const pace of ['agent', 'fast', 'human']) {
     test(`${pace} pace types into a field and clicks`, async () => {
         const b = new JevBrowser({ pace })
         try {
@@ -63,7 +63,7 @@ for (const pace of ['agent', 'human']) {
     })
 }
 
-for (const pace of ['agent', 'human']) {
+for (const pace of ['agent', 'fast', 'human']) {
     test(`${pace} pace: scroll end/top follow an in-app scroll panel`, async () => {
         const b = new JevBrowser({ pace })
         try {

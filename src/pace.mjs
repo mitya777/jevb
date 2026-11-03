@@ -1,4 +1,4 @@
-// Two paces for the same actions.
+// Three paces for the same actions.
 //
 // human (default): the page sees what a person produces — curved mouse travel,
 //   hover before click, per-key typing with jitter, a reading pause after
@@ -6,15 +6,21 @@
 //   when input isn't instantaneous, and makes recordings watchable.
 // agent: as fast as possible — direct clicks, fill() instead of keystrokes,
 //   no pauses; waits only on the page itself (load + network idle, capped).
+// fast: agent's input, without waiting for network idle (live SPAs with
+//   polling or analytics rarely reach it, so agent sat out its 3s cap). Done
+//   once the page has text that held still for ~100ms.
 
 const rand = (min, max) => min + Math.random() * (max - min)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-export const PACES = ['human', 'agent']
+export const PACES = ['human', 'agent', 'fast']
+
+// agent and fast send the same input; they differ only in how long they wait.
+export const quick = (pace) => pace !== 'human'
 
 export function resolvePace(pace) {
     const p = pace || process.env.JEVB_PACE || 'human'
-    if (!PACES.includes(p)) throw new Error(`unknown pace "${p}" (human|agent)`)
+    if (!PACES.includes(p)) throw new Error(`unknown pace "${p}" (human|agent|fast)`)
     return p
 }
 
@@ -47,7 +53,7 @@ async function targetPoint(locator) {
 }
 
 export async function click(page, locator, pace) {
-    if (pace === 'agent') return locator.click({ timeout: 10_000 })
+    if (quick(pace)) return locator.click({ timeout: 10_000 })
     await locator.scrollIntoViewIfNeeded({ timeout: 10_000 })
     await sleep(rand(120, 300))
     const { x, y } = await targetPoint(locator)
@@ -59,7 +65,7 @@ export async function click(page, locator, pace) {
 }
 
 export async function type(page, locator, text, pace) {
-    if (pace === 'agent') {
+    if (quick(pace)) {
         // fill() doesn't work on contenteditable editors in every framework;
         // fall back to an instant insertText there.
         try { return await locator.fill(text, { timeout: 10_000 }) } catch {
@@ -98,6 +104,7 @@ async function rendered(page, { maxMs = 4_000, pollMs = 150 } = {}) {
 // acting. Scale with visible text, capped so tests stay bounded.
 export async function settle(page, pace) {
     await page.waitForLoadState('domcontentloaded').catch(() => {})
+    if (pace === 'fast') return rendered(page, { maxMs: 2_000, pollMs: 50 })
     // Both paces wait for the page itself (SPAs render after DOMContentLoaded);
     // only human adds a reading pause on top.
     await page.waitForLoadState('networkidle', { timeout: pace === 'agent' ? 3_000 : 5_000 }).catch(() => {})
@@ -138,7 +145,7 @@ const scrollPos = (page, doc) => page.evaluate((doc) => {
 export async function scroll(page, dy, pace, { maxMs = 20_000 } = {}) {
     const target = await scrollTarget(page)
     const to = dy === 'end' || dy === 'bottom' ? 'end' : dy === 'top' ? 'top' : null
-    if (pace === 'agent') {
+    if (quick(pace)) {
         if (!to) return page.mouse.wheel(0, Number(dy)).then(() => page.mouse.move(target.x, target.y))
         return page.evaluate(({ doc, to }) => {
             const el = doc ? document.scrollingElement : document.querySelector('[data-jevb-scroller]')

@@ -136,3 +136,22 @@ test('pace defaults to fast; recording defaults to human; an explicit pace wins'
         assert.equal(new JevBrowser({ videoDir: '/tmp' }).pace, 'agent')
     } finally { if (saved == null) delete process.env.JEVB_PACE; else process.env.JEVB_PACE = saved }
 })
+
+// A click whose fetch outlasts the old 1.2s window and renders on arrival:
+// fast pace returns only after the response has rendered.
+test('fast act waits for the fetch its click started, then for the render', async () => {
+    const b = new JevBrowser({ pace: 'fast' })
+    try {
+        await b.open(site.url('next.html'))
+        const page = await b.page()
+        await page.evaluate(() => {
+            const btn = document.createElement('button')
+            btn.textContent = 'Load more'
+            btn.onclick = () => fetch('/slow/1800/next.html').then(() => setTimeout(() => document.body.insertAdjacentHTML('beforeend', '<p>More loaded</p>'), 100))
+            document.body.append(btn)
+        })
+        await b.act('click "Load more"')
+        const [c] = await b.checks([{ question: 'is "More loaded" shown?' }], { waitMs: 0 })
+        assert.equal(c.pass, true)
+    } finally { await b.shutdown() }
+})

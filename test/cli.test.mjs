@@ -42,6 +42,16 @@ test('--fast is a bare flag: it takes no value from the next argument', async ()
     await jevb('close', '--session', 'fast')
 })
 
+test('the third single call in a row carries a scriptable hint with the draft scenario', async () => {
+    const s = ['--session', 'hint']
+    assert.equal(json(await jevb('open', site.url('flow.html'), ...s)).hint, undefined)
+    assert.equal(json(await jevb('type', 'the "Write a reply" box', ...s, '--', 'secret text')).hint, undefined)
+    const { hint } = json(await jevb('act', 'click "Post reply"', ...s))
+    assert.equal(hint.scenario, `open ${site.url('flow.html')}\ntype the "Write a reply" box => \${TEXT_1}\nact click "Post reply"`)
+    assert.doesNotMatch(JSON.stringify(hint), /secret text/)
+    await jevb('close', ...s)
+})
+
 test('exit 1 on a failed check, refute, batch, or no match', async () => {
     await jevb('open', site.url('flow.html'), '--pace', 'agent')
     assert.equal((await jevb('check', 'is "Nope" shown?')).code, 1)

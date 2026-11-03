@@ -103,6 +103,9 @@ async function rendered(page, { maxMs = 4_000, pollMs = 150, minMs = 0 } = {}) {
     }
 }
 
+// Text that holds still ~100ms, no floor: after a click's fetches land.
+export const textSettled = (page) => rendered(page, { maxMs: 2_000, pollMs: 50 })
+
 // After navigation or a click that changes the page, a person reads before
 // acting. Scale with visible text, capped so tests stay bounded.
 export async function settle(page, pace) {

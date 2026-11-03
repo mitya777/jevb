@@ -55,7 +55,7 @@ text holds still ~100ms (600ms floor) and a click's requests finish. agent =
 same input, also waits for network idle (capped at 3s). human (default with
 JEVB_DEMO or JEVB_VIDEO) = curved mouse, hover dwell, per-key typing, reading
 pauses. Env: TYPESAFEAI_API_KEY (or ./.env),
-JEVB_PACE, JEVB_PORT, JEVB_IDLE_MS (chromium), JEVB_DAEMON_IDLE_MS, JEVB_HEADED=1,
+JEVB_PACE, JEVB_HINTS=0 (no scriptable-run hints), JEVB_PORT, JEVB_IDLE_MS (chromium), JEVB_DAEMON_IDLE_MS, JEVB_HEADED=1,
 JEVB_DEMO=1 (visible cursor + Jev HUD), JEVB_VIDEO=<dir> (record .webm),
 JEVB_CDP_URL (attach to a running Chrome, e.g. from bin/jevb-chrome.sh; tabs open in
 the background unless JEVB_FOREGROUND=1).

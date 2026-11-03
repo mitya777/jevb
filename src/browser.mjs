@@ -194,24 +194,25 @@ export class JevBrowser {
         // A navigation *request* comes before the new document commits, and
         // load-state waits in between resolve against the old document, so
         // wait for the main frame to actually navigate before settling.
-        // Fast pace ends the window early, once the fetches the click started
-        // have finished and the network has been quiet for ~100ms. Not before
-        // 500ms: a click handler's timer that navigates (no request first) is
-        // invisible until it fires.
+        // Fast pace has no fixed window: it waits for the fetches the click
+        // started to finish (cap 5s) and the network to be quiet ~100ms, then
+        // re-checks the text, since their responses render after the first
+        // settle. Not before 500ms: a click handler's timer that navigates
+        // (no request first) is invisible until it fires.
         const pending = new Set()
-        let onRequest, clickedAt
+        let onRequest, clickedAt, fetched = false
         const onDone = (req) => pending.delete(req)
         const navigated = new Promise((resolve) => {
             onRequest = (req) => {
                 if (req.isNavigationRequest() && req.frame() === page.mainFrame()) resolve(true)
-                else if (['fetch', 'xhr', 'ping', 'beacon'].includes(req.resourceType())) pending.add(req)
+                else if (['fetch', 'xhr', 'ping', 'beacon'].includes(req.resourceType())) { pending.add(req); fetched = true }
             }
             page.on('request', onRequest)
-            setTimeout(() => resolve(false), 1_200)
+            if (pc !== 'fast') setTimeout(() => resolve(false), 1_200)
         })
         const quiet = async () => {
             await sleep(500)
-            for (let calm = 0; Date.now() - clickedAt < 1_200; await sleep(50)) {
+            for (let calm = 0; Date.now() - clickedAt < 5_000; await sleep(50)) {
                 calm = pending.size ? 0 : calm + 1
                 if (calm >= 2) return false
             }
@@ -227,7 +228,7 @@ export class JevBrowser {
             await committed
             await page.waitForLoadState('load', { timeout: 15_000 }).catch(() => {})
             await pace.settle(page, pc)
-        }
+        } else if (pc === 'fast' && fetched) await pace.textSettled(page)
         page.off('request', onRequest)
         page.off('requestfinished', onDone)
         page.off('requestfailed', onDone)

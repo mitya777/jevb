@@ -114,6 +114,7 @@ command; exit 1 = error or failed check):
 - `jevb snap` lists what jevb can click. Read it after a NO_MATCH, then rephrase.
 - Name visible text in checks: `check is a "Saved" toast shown?`, not `check did it work?`.
 - Pace is `fast` by default; use `--pace human` only to catch hover/focus bugs. Run `jevb stop` when done.
+- A reply with a `hint` means the last steps could be one `jevb run`: save `hint.scenario` as a `.jevb` file and run that next time.
 ```
 
 `jevb update` installs the newest release later, and `jevb update --check`
@@ -385,6 +386,7 @@ from (see [.env.example](.env.example)). Shell variables win.
 | Variable | |
 |---|---|
 | `TYPESAFEAI_API_KEY` (or `TYPESAFE_API_KEY`) | **required**, from [console.typesafe.ai/keys](https://console.typesafe.ai/keys) |
+| `JEVB_HINTS` | `0` turns off scriptable-run hints (on by default) |
 | `JEVB_PACE` | `fast` (default), `agent` or `human`; recording (`JEVB_DEMO`, `JEVB_VIDEO`) defaults to `human` |
 | `JEVB_WAIT_MS` | how long checks and actions wait for the screen (4000; 0 = off) |
 | `JEVB_HEADED=1` · `JEVB_DEMO=1` · `JEVB_VIDEO=<dir>` | show the window · draw a cursor and a HUD of Jev's picks · record a `.webm` per session |

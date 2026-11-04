@@ -185,6 +185,7 @@ $('#like').onclick = async () => {
   const r = await fetch('/api/like', { method: 'POST', headers: { 'x-xsrf-token': document.cookie.match(/xsrf=([^;]+)/)[1] } })
   out(r.ok ? 'Liked' : 'Like failed ' + r.status)
 }
+$('[placeholder=Note]').oninput = (e) => { fetch('/api/autosave', { method: 'POST', body: e.target.value }) }
 $('#save').onclick = () => setTimeout(() => fetch('/api/autosave', { method: 'POST', body: 'x=y' }), 1000) // after act has returned
 $('#list').onclick = async () => {
   const r = await fetch('/api/orders', { headers: { authorization: 'Bearer ' + JSON.parse(localStorage.getItem('auth')).token } })

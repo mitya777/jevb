@@ -194,8 +194,9 @@ const responseValues = (text) => {
 
 // Whether a captured flow can run again without its page. Anything unclear
 // is a reason not to: the page is slower, never wrong.
-export function assess(cap, { wsFrames = 0, binary = false, responses = [], order = [], typed = [] } = {}) {
+export function assess(cap, { wsFrames = 0, binary = false, responses = [], order = [], typed = [], crossSite = [] } = {}) {
     const reasons = []
+    if (crossSite.length) reasons.push(`writes to another site: ${crossSite.join(', ')}`)
     // One parameter would stand for both, and a later edit to one field lost.
     const texts = typed.map((t) => t.value)
     if (new Set(texts).size < texts.length) reasons.push('two fields hold the same text')
@@ -216,7 +217,8 @@ export function assess(cap, { wsFrames = 0, binary = false, responses = [], orde
         for (const [k, v] of Object.entries(r.headers)) if (literal(k, v)) reasons.push(`one-time header ${k}`)
         let fields = []
         try { fields = Object.entries(JSON.parse(body.replace(/\{\{[^}]+\}\}/g, 'x'))) } catch { fields = [...new URLSearchParams(body)] }
-        for (const [k, v] of fields) if (literal(k, v)) reasons.push(`one-time field ${k}`)
+        const query = r.url.includes('?') ? [...new URLSearchParams(r.url.slice(r.url.indexOf('?') + 1))] : []
+        for (const [k, v] of [...fields, ...query]) if (literal(k, v)) reasons.push(`one-time field ${k}`)
         const stripped = `${r.url} ${body}`.replace(/\{\{[^}]+\}\}/g, '')
         if (/[A-Fa-f0-9]{40,}|[A-Za-z0-9+_-]{64,}/.test(stripped)) reasons.push('holds a value computed in the page')
         // A value the server handed back earlier in the flow (a new id).

@@ -385,7 +385,7 @@ export class JevBrowser {
         page.on('request', (r) => {
             if (!f.on) return
             const type = r.resourceType()
-            if (type === 'fetch' || type === 'xhr' || (type === 'document' && r.method() !== 'GET')) f.reqs.push({ r, at: f.at })
+            if (type === 'fetch' || type === 'xhr' || (type === 'document' && r.method() !== 'GET')) f.reqs.push({ r, at: f.at, step: f.step })
         })
         const finished = (r) => f.done.add(r)
         page.on('requestfinished', finished)
@@ -394,10 +394,13 @@ export class JevBrowser {
         return page
     }
 
-    async flowStep(fn, session) {
+    // typing: its requests collapse to the last per endpoint, since keystrokes
+    // at human pace each send a prefix of the text, which must not be saved.
+    async flowStep(fn, session, { typing = false } = {}) {
         const f = this.flow
         if (!f) return fn()
         const page = await this.flowAttach(session)
+        f.step = { typing }
         if (page.url() !== 'about:blank') f.sources.push(...await capture.tokenSources(page))
         f.at = page.url()
         f.on = true
@@ -414,9 +417,15 @@ export class JevBrowser {
             await sleep(500)
         }
         const seen = []
-        for (const { r, at } of f.reqs) {
+        const crossSite = new Set()
+        const endpoint = (x) => { const u = new URL(x.r.url()); return `${x.r.method()} ${u.origin}${u.pathname}` }
+        const kept = f.reqs.filter((x, i) => !x.step?.typing || !f.reqs.slice(i + 1).some((y) => y.step === x.step && endpoint(y) === endpoint(x)))
+        for (const { r, at } of kept) {
             if (r.redirectedFrom()) continue
             const headers = await r.allHeaders().catch(() => null)
+            // A readable write to another site can be the action itself. An
+            // analytics ping is no-cors: it can't read the answer anyway.
+            if (headers?.['sec-fetch-site'] === 'cross-site' && headers['sec-fetch-mode'] === 'cors' && !['GET', 'HEAD', 'OPTIONS'].includes(r.method())) crossSite.add(new URL(r.url()).hostname)
             if (!headers || headers['sec-fetch-site'] === 'cross-site') continue
             // An unfinished request can lack that header: a different host is
             // third-party here too (a stuck analytics call isn't the action).
@@ -443,6 +452,7 @@ export class JevBrowser {
         cap.hash = hash
         cap.replay = capture.assess(cap, {
             wsFrames: f.ws,
+            crossSite: [...crossSite],
             binary: writes.some((x) => x.r.postDataBuffer() && x.r.postData() == null),
             responses: seen.map((x) => ({ index: writes.indexOf(x), order: seen.indexOf(x), text: x.text })),
             order: writes.map((x) => seen.indexOf(x)),

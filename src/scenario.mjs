@@ -217,7 +217,7 @@ export async function runScenario(file, { pace, baseUrl, batch = true, onStep = 
                         // type x => ${NAME}: a capture names the parameter NAME.
                         const as = typeParams.find((t) => t.line === s.line).name
                         const opts = { checks, as, capture: takeCapture(), script: useLocators ? s.locator : undefined }
-                        out = await (b.flowStep ? b.flowStep(() => b.type(intent, expand(text ?? ''), opts)) : b.type(intent, expand(text ?? ''), opts))
+                        out = await (b.flowStep ? b.flowStep(() => b.type(intent, expand(text ?? ''), opts), undefined, { typing: true }) : b.type(intent, expand(text ?? ''), opts))
                         note(s, out.typed)
                         break
                     }

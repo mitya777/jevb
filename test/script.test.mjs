@@ -160,13 +160,13 @@ test('assess: what makes a capture unsafe to replay', () => {
 })
 
 test('chooseTier: every reason to stay on the page', () => {
-    const steps = parse('open /\nact go\n')
+    const steps = parse('open /\nact go  @@ text="Go"\n')
     const cap = { hash: 'h', replay: { ok: true } }
     const base = { steps, cap, hash: 'h', pace: 'fast' }
     assert.equal(chooseTier(base).tier, 'send')
     for (const [over, why] of [
         [{ via: 'page' }, /via page/], [{ onDevice: true }, /phone/], [{ demo: true }, /recording/], [{ pace: 'human' }, /human/],
-        [{ steps: parse('open /\ncheck ok?\n') }, /reads the page/], [{ steps: parse('open /\nact? maybe\n') }, /reads the page/],
+        [{ steps: parse('open /\ncheck ok?\n') }, /reads the page/], [{ steps: parse('open /\nact go\n') }, /no fixed target/], [{ steps: parse('open /\nact publish the newest post  @@ text="x"\n') }, /no fixed target/], [{ steps: parse('open /\nact? maybe\n') }, /reads the page/],
         [{ cap: null }, /no capture/], [{ hash: 'other' }, /changed/], [{ cap: { hash: 'h', replay: { ok: false, reasons: ['talks over a websocket'] } } }, /websocket/],
     ]) {
         const d = chooseTier({ ...base, ...over })
@@ -248,4 +248,12 @@ test('a status that changed stops the flow before its next request', async () =>
 test('typed text the requests do not carry as a value keeps the flow on the page', () => {
     const c = { params: [], requests: [{ method: 'POST', url: 'https://x.test/a', headers: {}, status: 201, body: '{"qty":2}' }] }
     assert.match(assess(c, { order: [0], typed: [{ name: 'TYPE_1', value: '2' }] }).reasons.join(), /not found in the requests: TYPE_1/)
+})
+
+test('changing a ${NAME} changes the flow; changing literal text does not', async () => {
+    const { flowHash } = await import('../src/script.mjs')
+    const h = (t) => flowHash(parse(t), 'http://x/')
+    assert.equal(h('type a => one\n'), h('type a => two\n'))
+    assert.notEqual(h('type a => ${OLD}\n'), h('type a => ${NEW}\n'))
+    assert.notEqual(h('type a => one\n'), h('type a => ${NEW}\n'))
 })

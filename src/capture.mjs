@@ -290,7 +290,11 @@ export async function send(capture, { context, pageFor, values = {}, env = proce
             failOnStatusCode: false,
         })
         let res = await once()
-        if (hasTokens && [401, 403, 419, 422].includes(res.status())) { await res.dispose(); await readAll(true); res = await once() }
+        if (hasTokens && [401, 403, 419, 422].includes(res.status())) {
+            await res.dispose()
+            try { await readAll(true) } catch (e) { throw Object.assign(e, { attempted: results.length }) }
+            res = await once()
+        }
         const text = await res.text().catch(() => '')
         await res.dispose() // else the context keeps every body until it closes
         let json

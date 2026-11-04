@@ -62,7 +62,12 @@ export async function stableLocator(page, id, { avoid = [] } = {}) {
 
 // Same flow on the same host: typed text can change, anything else re-records.
 export function flowHash(steps, baseUrl) {
-    const shape = steps.map((s) => (s.cmd === 'type' ? `type ${s.arg.split(/\s*=>\s*/)[0]}` : `${s.cmd} ${s.arg}`))
+    // ${NAME} is the parameter's name in the capture, so it counts; literal text doesn't.
+    const shape = steps.map((s) => {
+        if (s.cmd !== 'type') return `${s.cmd} ${s.arg}`
+        const [intent, text = ''] = s.arg.split(/\s*=>\s*/)
+        return `type ${intent} => ${text.trim().match(/^\$\{[A-Z0-9_]+\}$/)?.[0] || ''}`
+    })
     return crypto.createHash('sha1').update(JSON.stringify([baseUrl || '', shape])).digest('hex')
 }
 
@@ -79,6 +84,9 @@ export function chooseTier({ steps, cap, hash, via = 'auto', pace, demo, onDevic
     if (demo) return page('recording needs the page')
     if (pace === 'human' || steps.some((s) => s.cmd === 'pace' && s.arg === 'human')) return page('human pace tests the page')
     if (!onlyPutsData(steps)) return page('a step reads the page')
+    // No selector means no fixed target ("the newest post", one Reply among
+    // many): a replay would hit the recorded one, not today's.
+    if (steps.some((s) => (s.cmd === 'act' || s.cmd === 'type') && (!s.locator || isRelative(s.arg.split(/\s*=>\s*/)[0])))) return page('a step has no fixed target')
     if (!cap) return page('no capture yet')
     if (cap.hash !== hash) return page('the flow or host changed since its capture')
     if (!cap.replay?.ok) return page(cap.replay?.reasons?.join('; ') || 'capture has no verdict')

@@ -14,7 +14,7 @@ if (fs.existsSync('.env')) { try { process.loadEnvFile('.env') } catch {} }
 const PORT = Number(process.env.JEVB_PORT || 7788)
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 
-const USAGE = `jevb <command> [args] [--pace human|agent] [--session NAME]
+const USAGE = `jevb <command> [args] [--pace human|agent|fast] [--fast] [--session NAME]
 
   open <url>                       navigate (starts daemon + chromium on demand)
   open [url] --device NAME [--app FILE|URL|ARN|BUNDLE_ID] [--platform ios|android] [--attach]
@@ -44,7 +44,7 @@ const USAGE = `jevb <command> [args] [--pace human|agent] [--session NAME]
                                    --full: the whole page's text
   snap                             list interactive elements Jev chooses from
   shot <path> [--full]             screenshot
-  pace [human|agent]               get/set the daemon default pace
+  pace [human|agent|fast]          get/set the daemon default pace
   close                            close session (last one closes chromium)
   status | stop | serve
   setup                            install the browser if missing, verify the Jev key; JSON, exit 1 if not ready
@@ -55,9 +55,12 @@ const USAGE = `jevb <command> [args] [--pace human|agent] [--session NAME]
                                    consecutive checks batch into one Jev call
                                    (--no-batch to compare)
 
-Pace: human (default) = curved mouse, hover dwell, per-key typing, reading
-pauses. agent = as fast as possible. Env: TYPESAFEAI_API_KEY (or ./.env),
-JEVB_PACE, JEVB_PORT, JEVB_IDLE_MS (chromium), JEVB_DAEMON_IDLE_MS, JEVB_HEADED=1,
+Pace: fast (default; --fast) = direct clicks and fill(), done once the page's
+text holds still ~100ms (600ms floor) and a click's requests finish. agent =
+same input, also waits for network idle (capped at 3s). human (default with
+JEVB_DEMO or JEVB_VIDEO) = curved mouse, hover dwell, per-key typing, reading
+pauses. Env: TYPESAFEAI_API_KEY (or ./.env),
+JEVB_PACE, JEVB_HINTS=0 (no scriptable-run hints), JEVB_PORT, JEVB_IDLE_MS (chromium), JEVB_DAEMON_IDLE_MS, JEVB_HEADED=1,
 JEVB_DEMO=1 (visible cursor + Jev HUD), JEVB_VIDEO=<dir> (record .webm),
 JEVB_CDP_URL (attach to a running Chrome, e.g. from bin/jevb-chrome.sh; tabs open in
 the background unless JEVB_FOREGROUND=1).
@@ -75,7 +78,7 @@ function parseArgs(argv) {
         else if (a.startsWith('--')) {
             const k = a.slice(2)
             const next = argv[i + 1]
-            if (['enter', 'full', 'help', 'no-batch', 'attach'].includes(k)) flags[k] = true
+            if (['enter', 'full', 'help', 'no-batch', 'attach', 'fast'].includes(k)) flags[k] = true
             else if (k === 'check' || k === 'refute') { (flags[k] ||= []).push(next); i++ }
             else { flags[k] = next; i++ }
         } else pos.push(a)
@@ -119,6 +122,7 @@ function sendArgs(common, pos) {
 async function main() {
     const [cmd, ...argv] = process.argv.slice(2)
     const { flags, pos, rest } = parseArgs(argv)
+    if (flags.fast) flags.pace = 'fast'
     if (!cmd || flags.help || cmd === 'help') return console.log(USAGE)
 
     if (cmd === 'version' || cmd === '--version' || cmd === '-v') return console.log((await import('../src/update.mjs')).version())

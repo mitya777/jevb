@@ -20,6 +20,7 @@ const CDP_URL = process.env.JEVB_CDP_URL || null
 // `close` still closes its tab. JEVB_CLOSE_TABS=1 closes them on detach too.
 const CLOSE_TABS = process.env.JEVB_CLOSE_TABS === '1'
 const FOREGROUND = process.env.JEVB_FOREGROUND === '1'
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 export class JevBrowser {
     constructor({ idleMs = DEFAULT_IDLE_MS, pace: p, headless = process.env.JEVB_HEADED !== '1',
@@ -29,7 +30,7 @@ export class JevBrowser {
         this.step = ''
         this.jevRequests = 0
         this.jevTokens = { input: 0, output: 0 }
-        this.pace = pace.resolvePace(p)
+        this.pace = pace.resolvePace(p, demo || videoDir ? 'human' : 'fast')
         this.browser = null
         this.launching = null
         this.sessions = new Map() // name -> { context, page }
@@ -201,22 +202,52 @@ export class JevBrowser {
         // A navigation *request* comes before the new document commits, and
         // load-state waits in between resolve against the old document, so
         // wait for the main frame to actually navigate before settling.
-        let onRequest
+        // Fast pace has no fixed window: it waits for the fetches the click
+        // started to finish (cap 5s) and the network to be quiet ~100ms, then
+        // re-checks the text, since their responses render after the first
+        // settle. Not before 500ms: a click handler's timer that navigates
+        // (no request first) is invisible until it fires.
+        const pending = new Set()
+        let onRequest, clickedAt, fetched = false, navRequested = false
+        const onDone = (req) => pending.delete(req)
         const navigated = new Promise((resolve) => {
-            onRequest = (req) => req.isNavigationRequest() && req.frame() === page.mainFrame() && resolve(true)
+            onRequest = (req) => {
+                if (req.isNavigationRequest() && req.frame() === page.mainFrame()) { navRequested = true; resolve(true) }
+                else if (['fetch', 'xhr', 'ping', 'beacon'].includes(req.resourceType())) { pending.add(req); fetched = true }
+            }
             page.on('request', onRequest)
-            setTimeout(() => resolve(false), 1_200)
+            if (pc !== 'fast') setTimeout(() => resolve(false), 1_200)
         })
+        const drain = async () => {
+            for (let calm = 0; Date.now() - clickedAt < 5_000; await sleep(50)) {
+                calm = pending.size ? 0 : calm + 1
+                if (calm >= 2) return false
+            }
+            return false
+        }
+        const quiet = () => sleep(500).then(drain)
+        if (pc === 'fast') { page.on('requestfinished', onDone); page.on('requestfailed', onDone) }
         const committed = page.waitForEvent('framenavigated', { predicate: (f) => f === page.mainFrame(), timeout: 15_000 }).catch(() => null)
         const rec = file && await this.startCapture(page)
         await pace.click(page, locator, pc)
+        clickedAt = Date.now()
+        const nav = pc === 'fast' ? Promise.race([navigated, quiet()]) : navigated
         await pace.settle(page, pc)
-        if (await navigated) {
+        let went = await nav
+        if (!went && pc === 'fast') {
+            // A fetch or a navigation can start after quiet() ended, during settle.
+            await drain()
+            went = navRequested
+            if (!went && fetched) await pace.textSettled(page)
+        }
+        if (went) {
             await committed
             await page.waitForLoadState('load', { timeout: 15_000 }).catch(() => {})
             await pace.settle(page, pc)
         }
         page.off('request', onRequest)
+        page.off('requestfinished', onDone)
+        page.off('requestfailed', onDone)
         return { clicked: target, url: page.url(), checks: checkResults, ...(rec && { captured: await this.finishCapture(rec, file, session) }) }
     }
 

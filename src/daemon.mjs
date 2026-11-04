@@ -5,6 +5,7 @@ import http from 'node:http'
 import { JevBrowser } from './browser.mjs'
 import { JevDevice } from './device.mjs'
 import { listDevices } from './devicefarm.mjs'
+import { Watch } from './watch.mjs'
 
 export const PORT = Number(process.env.JEVB_PORT || 7788)
 const DAEMON_IDLE_MS = Number(process.env.JEVB_DAEMON_IDLE_MS || 15 * 60_000)
@@ -37,6 +38,8 @@ export function serve() {
     const log = (m) => console.log(new Date().toISOString(), m)
     const browser = new JevBrowser({ log })
     const device = new JevDevice({ log })
+    // JEVB_HINTS=0 turns off the scriptable-run hints (see watch.mjs).
+    const watch = process.env.JEVB_HINTS === '0' ? null : new Watch()
     const shutdownAll = (reason) => Promise.all([browser.shutdown(reason), device.shutdown(reason)])
     let exitTimer
     const armExit = () => {
@@ -58,7 +61,9 @@ export function serve() {
                 return process.exit(0)
             }
             const useDevice = !['status', 'devices', 'pace'].includes(name) && onDevice(device, name, args)
-            send(200, await ACTIONS[name](useDevice ? device : browser, args, device))
+            const out = await ACTIONS[name](useDevice ? device : browser, args, device)
+            const hint = watch?.record(name, args)
+            send(200, hint && !Array.isArray(out) ? { ...out, hint } : out)
         } catch (e) {
             send(500, { error: e.message, code: e.code, detail: e.detail, checks: e.checks })
         }

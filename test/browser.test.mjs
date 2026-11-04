@@ -51,7 +51,7 @@ test('sessions are isolated browser contexts', async () => {
     } finally { await b.shutdown() }
 })
 
-for (const pace of ['agent', 'human']) {
+for (const pace of ['agent', 'fast', 'human']) {
     test(`${pace} pace types into a field and clicks`, async () => {
         const b = new JevBrowser({ pace })
         try {
@@ -63,7 +63,7 @@ for (const pace of ['agent', 'human']) {
     })
 }
 
-for (const pace of ['agent', 'human']) {
+for (const pace of ['agent', 'fast', 'human']) {
     test(`${pace} pace: scroll end/top follow an in-app scroll panel`, async () => {
         const b = new JevBrowser({ pace })
         try {
@@ -122,4 +122,71 @@ test('an action waits for its target to appear, within waitMs', async () => {
         assert.ok(out.clicked.tries > 1, `re-polled (${out.clicked.tries} tries)`)
         assert.equal(await page.locator('button').last().textContent(), 'Done')
     } finally { process.env.JEVB_WAIT_MS = '0'; await b.shutdown() }
+})
+
+test('pace defaults to fast; recording defaults to human; an explicit pace wins', () => {
+    const saved = process.env.JEVB_PACE
+    delete process.env.JEVB_PACE
+    try {
+        assert.equal(new JevBrowser().pace, 'fast')
+        assert.equal(new JevBrowser({ demo: true }).pace, 'human')
+        assert.equal(new JevBrowser({ videoDir: '/tmp' }).pace, 'human')
+        assert.equal(new JevBrowser({ demo: true, pace: 'agent' }).pace, 'agent')
+        process.env.JEVB_PACE = 'agent'
+        assert.equal(new JevBrowser({ videoDir: '/tmp' }).pace, 'agent')
+    } finally { if (saved == null) delete process.env.JEVB_PACE; else process.env.JEVB_PACE = saved }
+})
+
+// A click whose fetch outlasts the old 1.2s window and renders on arrival:
+// fast pace returns only after the response has rendered.
+test('fast act waits for the fetch its click started, then for the render', async () => {
+    const b = new JevBrowser({ pace: 'fast' })
+    try {
+        await b.open(site.url('next.html'))
+        const page = await b.page()
+        await page.evaluate(() => {
+            const btn = document.createElement('button')
+            btn.textContent = 'Load more'
+            btn.onclick = () => fetch('/slow/1800/next.html').then(() => setTimeout(() => document.body.insertAdjacentHTML('beforeend', '<p>More loaded</p>'), 100))
+            document.body.append(btn)
+        })
+        await b.act('click "Load more"')
+        const [c] = await b.checks([{ question: 'is "More loaded" shown?' }], { waitMs: 0 })
+        assert.equal(c.pass, true)
+    } finally { await b.shutdown() }
+})
+
+// A fetch that starts after the quiet check passed, while the page settles.
+test('fast act also waits for a fetch that starts late', async () => {
+    const b = new JevBrowser({ pace: 'fast' })
+    try {
+        await b.open(site.url('next.html'))
+        const page = await b.page()
+        await page.evaluate(() => {
+            const btn = document.createElement('button')
+            btn.textContent = 'Load later'
+            btn.onclick = () => setTimeout(() => fetch('/slow/1200/next.html').then(() => document.body.insertAdjacentHTML('beforeend', '<p>Late loaded</p>')), 580)
+            document.body.append(btn)
+        })
+        await b.act('click "Load later"')
+        const [c] = await b.checks([{ question: 'is "Late loaded" shown?' }], { waitMs: 0 })
+        assert.equal(c.pass, true)
+    } finally { await b.shutdown() }
+})
+
+// A timer navigation that fires after the quiet check, while the page settles.
+test('fast act waits out a navigation that starts during settle', async () => {
+    const b = new JevBrowser({ pace: 'fast' })
+    try {
+        await b.open(site.url('next.html'))
+        const page = await b.page()
+        await page.evaluate(() => {
+            const btn = document.createElement('button')
+            btn.textContent = 'Go back'
+            btn.onclick = () => setTimeout(() => { location.href = '/slow/300/flow.html' }, 580)
+            document.body.append(btn)
+        })
+        const r = await b.act('click "Go back"')
+        assert.match(r.url, /flow\.html$/)
+    } finally { await b.shutdown() }
 })

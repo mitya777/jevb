@@ -150,7 +150,7 @@ export async function runScenario(file, { pace, baseUrl, batch = true, onStep = 
                     const changed = r.find((x, i) => x.status !== cap.requests[i].status)
                     const bad = !out.ok || changed
                     if (bad) failed++
-                    emit({ step: `send ${path.basename(capFile)}`, ms: Date.now() - t, ...out, ...(bad && { error: !out.ok ? `stopped at ${r.at(-1).status} after ${r.length} of ${cap.requests.length} requests; not re-run, it may have taken effect` : `status ${changed.status}, recorded ${cap.requests[r.indexOf(changed)].status}` }) })
+                    emit({ step: `send ${path.basename(capFile)}`, ms: Date.now() - t, ...out, ...(bad && { error: changed ? `request ${r.indexOf(changed) + 1} of ${cap.requests.length} answered ${changed.status}, recorded ${cap.requests[r.indexOf(changed)].status}; stopped, not re-run` : `stopped at ${r.at(-1).status} after ${r.length} of ${cap.requests.length} requests; not re-run, it may have taken effect` }) })
                     lastWorkEnd = Date.now()
                     sent = true
                 }

@@ -222,3 +222,30 @@ test('a request that lands after its step is part of the flow, so replay sends i
     assert.equal((await run(file)).via, 'send')
     assert.equal(b0.autosaves, n + 1)
 })
+
+test('a redirected POST replays by request and its final status is what counts', async () => {
+    const file = scenarioFile(`${LOGIN}act click "Reorder"\n`)
+    assert.equal((await run(file)).failed, 0)
+    const cap = JSON.parse(fs.readFileSync(`${file}.capture.json`, 'utf8'))
+    assert.equal(cap.requests.at(-1).status, 201)
+    const n = site.shop.orders.length
+    const r = await run(file)
+    assert.equal(r.via, 'send')
+    assert.equal(r.failed, 0, JSON.stringify(r.results))
+    assert.equal(site.shop.orders.length, n + 1)
+})
+
+test('a status that changed stops the flow before its next request', async () => {
+    const { send } = await import('../src/capture.mjs')
+    const asked = []
+    const context = { request: { fetch: async (url) => { asked.push(url); return { status: () => 202, url: () => url, text: async () => '{}', dispose: async () => {} } } } }
+    const cap = { params: [], sources: {}, requests: [{ method: 'POST', url: 'https://x.test/a', headers: {}, status: 201 }, { method: 'POST', url: 'https://x.test/b', headers: {}, status: 201 }] }
+    const out = await send(cap, { context, pageFor: async () => null })
+    assert.deepEqual(asked, ['https://x.test/a'])
+    assert.equal(out.length, 1)
+})
+
+test('typed text the requests do not carry as a value keeps the flow on the page', () => {
+    const c = { params: [], requests: [{ method: 'POST', url: 'https://x.test/a', headers: {}, status: 201, body: '{"qty":2}' }] }
+    assert.match(assess(c, { order: [0], typed: [{ name: 'TYPE_1', value: '2' }] }).reasons.join(), /not found in the requests: TYPE_1/)
+})

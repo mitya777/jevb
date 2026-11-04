@@ -422,8 +422,11 @@ export class JevBrowser {
             // third-party here too (a stuck analytics call isn't the action).
             if (!headers['sec-fetch-site'] && /^https?:/.test(at) && new URL(r.url()).hostname !== new URL(at).hostname) continue
             // Only finished ones: a stream or long poll's body never ends.
-            if (!f.done.has(r)) { seen.push({ r, at, headers, status: null, text: '' }); continue }
-            const res = await r.response().catch(() => null)
+            // A redirect's status is its last hop's: replay follows them too.
+            let last = r
+            while (last.redirectedTo()) last = last.redirectedTo()
+            if (!f.done.has(last)) { seen.push({ r, at, headers, status: null, text: '' }); continue }
+            const res = await last.response().catch(() => null)
             const text = await Promise.race([res?.text().catch(() => ''), sleep(1_000).then(() => '')])
             seen.push({ r, at, headers, status: res?.status() ?? null, text: text ?? '' })
         }

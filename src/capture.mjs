@@ -199,6 +199,10 @@ export function assess(cap, { wsFrames = 0, binary = false, responses = [], orde
     // One parameter would stand for both, and a later edit to one field lost.
     const texts = typed.map((t) => t.value)
     if (new Set(texts).size < texts.length) reasons.push('two fields hold the same text')
+    // Typed but not found as a value in the requests: the page transformed it
+    // (a quantity to a number) or never sent it, so a new value couldn't apply.
+    const lost = typed.filter((t) => t.name && !cap.params.includes(t.name)).map((t) => t.name)
+    if (lost.length) reasons.push(`typed text not found in the requests: ${lost.join(', ')}`)
     if (!cap.requests.length) reasons.push('sends no requests')
     if (wsFrames) reasons.push('talks over a websocket')
     if (binary) reasons.push('sends binary data')
@@ -292,7 +296,9 @@ export async function send(capture, { context, pageFor, values = {}, env = proce
         let json
         try { json = JSON.parse(text) } catch {}
         results.push({ method: r.method, url: res.url(), status: res.status(), ms: Date.now() - t, ...(json !== undefined ? { json } : { body: text.slice(0, 2000) }) })
-        if (res.status() >= 400) break
+        // A write that answered differently than when recorded may not have
+        // done the same thing: what follows could depend on it.
+        if (res.status() >= 400 || (r.status != null && res.status() !== r.status)) break
     }
     return results
 }

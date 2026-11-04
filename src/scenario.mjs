@@ -133,8 +133,12 @@ export async function runScenario(file, { pace, baseUrl, batch = true, onStep = 
             let out = null, refused = null
             const t = Date.now()
             try { out = await b.send(capFile, { values }) } catch (e) {
-                if (e.code === 'SOURCE_GONE') refused = e.message // nothing was sent
-                else throw e
+                if (e.code === 'SOURCE_GONE' && !e.attempted) refused = e.message // nothing went out
+                else {
+                    failed++
+                    emit({ step: `send ${path.basename(capFile)}`, ms: Date.now() - t, error: `${e.message}; not re-run, an earlier request may have taken effect` })
+                    sent = true
+                }
             }
             if (out) {
                 const r = out.results

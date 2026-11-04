@@ -155,6 +155,7 @@ function shopApp() {
 <button id="list">My orders</button>
 <button id="reorder">Reorder</button>
 <button id="like">Like</button>
+<button id="save">Late save</button>
 <input placeholder="Search">
 <form method="post" action="/api/subscribe"><input type="hidden" name="authenticity_token" value="${formToken}"><input name="news_email" placeholder="Newsletter email"><button>Subscribe</button></form>
 <p id="out"></p>
@@ -184,6 +185,7 @@ $('#like').onclick = async () => {
   const r = await fetch('/api/like', { method: 'POST', headers: { 'x-xsrf-token': document.cookie.match(/xsrf=([^;]+)/)[1] } })
   out(r.ok ? 'Liked' : 'Like failed ' + r.status)
 }
+$('#save').onclick = () => setTimeout(() => fetch('/api/autosave', { method: 'POST', body: 'x=y' }), 1000) // after act has returned
 $('#list').onclick = async () => {
   const r = await fetch('/api/orders', { headers: { authorization: 'Bearer ' + JSON.parse(localStorage.getItem('auth')).token } })
   out(r.ok ? 'Orders: ' + (await r.json()).map((o) => o.item).join(', ') : 'List failed ' + r.status)
@@ -191,7 +193,7 @@ $('#list').onclick = async () => {
 </script></body></html>`
     }
     return {
-        orders, sessions,
+        orders, sessions, autosaves: 0,
         fail: null, // a status for POST /api/orders to answer with, after taking the order
         async handle(req, res) {
             const url = new URL(req.url, 'http://x')
@@ -214,6 +216,7 @@ $('#list').onclick = async () => {
                 const c = (req.headers.cookie || '').match(/(?:^|; )xsrf=([^;]+)/)?.[1]
                 return json(res, c && c === req.headers['x-xsrf-token'] ? 200 : 403, { liked: !!c && c === req.headers['x-xsrf-token'] }), true
             }
+            if (url.pathname === '/api/autosave') { await body(req); this.autosaves++; return json(res, 200, {}), true }
             if (url.pathname === '/api/reorder') { res.writeHead(307, { location: '/api/orders' }); res.end(); return true }
             if (url.pathname === '/api/search') return json(res, 200, { q: url.searchParams.get('q') }), true
             if (url.pathname === '/api/subscribe' && req.method === 'POST') {

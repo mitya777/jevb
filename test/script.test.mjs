@@ -154,6 +154,8 @@ test('assess: what makes a capture unsafe to replay', () => {
     assert.match(why(cap([req({ body: `{"tx":"${'ab'.repeat(40)}"}` })])), /computed in the page/)
     assert.match(why(cap([req({ body: 'filename="a.png"' })])), /uploads a file/)
     assert.match(why(cap([req()], ['FIELD_API_KEY'])), /no known source/)
+    assert.match(why(cap([req({ body: 'a=b' })]), { typed: [{ value: 'same' }, { value: 'same' }] }), /same text/)
+    assert.match(why(cap([req({ url: 'https://x.test/items/42/publish' })]), { order: [1], responses: [{ order: 0, text: '{"id":42}' }] }), /earlier response/)
     assert.match(why(cap([req({ url: 'https://x.test/posts/48213/publish' })]), { order: [1], responses: [{ order: 0, text: '{"id":48213}' }] }), /earlier response/)
 })
 
@@ -207,4 +209,16 @@ test('stableLocator: inner text hits, hidden duplicates, position only for a few
         assert.equal(await stableLocator(page, 'reply'), null, 'one of many: stays with Jev')
         assert.equal(await stableLocator(page, 'pw', { avoid: ['me@secret.test'] }), null, 'never writes typed text')
     } finally { await b.shutdown() }
+})
+
+test('a request that lands after its step is part of the flow, so replay sends it too', async () => {
+    const file = scenarioFile('open shop.html\nact click "Late save"\n')
+    const b0 = site.shop
+    const r = await run(file)
+    assert.equal(r.failed, 0, JSON.stringify(r.results))
+    const cap = JSON.parse(fs.readFileSync(`${file}.capture.json`, 'utf8'))
+    assert.deepEqual(cap.requests.map((x) => new URL(x.url).pathname), ['/api/autosave'])
+    const n = b0.autosaves
+    assert.equal((await run(file)).via, 'send')
+    assert.equal(b0.autosaves, n + 1)
 })

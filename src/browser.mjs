@@ -369,9 +369,9 @@ export class JevBrowser {
 
     // ---- capture / send (see capture.mjs) ---------------------------------
 
-    // A whole flow's capture, recorded passively while jevb run drives it.
-    // Only requests inside an input step count, so a page's background
-    // polling isn't mistaken for the action.
+    // A whole flow's capture, recorded passively while jevb run drives it,
+    // from the first input step to the end: a debounced autosave lands after
+    // its step returns. What the page loads before that isn't the action.
     startFlow() {
         this.flow = { reqs: [], done: new Set(), sources: [], ws: 0, on: false, pages: new WeakSet(), at: null }
     }
@@ -401,9 +401,7 @@ export class JevBrowser {
         if (page.url() !== 'about:blank') f.sources.push(...await capture.tokenSources(page))
         f.at = page.url()
         f.on = true
-        try { return await fn() } finally {
-            f.on = false
-        }
+        return fn()
     }
 
     // Writes the capture with its verdict on whether it's safe to replay.
@@ -411,7 +409,10 @@ export class JevBrowser {
         const f = this.flow
         this.flow = null
         if (!f) return null
-        for (let t = Date.now(); f.reqs.some(({ r }) => !f.done.has(r)) && Date.now() - t < 5_000;) await sleep(50)
+        for (let n = -1, t = Date.now(); (n !== f.reqs.length || f.reqs.some(({ r }) => !f.done.has(r))) && Date.now() - t < 5_000;) {
+            n = f.reqs.length
+            await sleep(500)
+        }
         const seen = []
         for (const { r, at } of f.reqs) {
             if (r.redirectedFrom()) continue
@@ -442,6 +443,7 @@ export class JevBrowser {
             binary: writes.some((x) => x.r.postDataBuffer() && x.r.postData() == null),
             responses: seen.map((x) => ({ index: writes.indexOf(x), order: seen.indexOf(x), text: x.text })),
             order: writes.map((x) => seen.indexOf(x)),
+            typed,
         })
         fs.writeFileSync(file, JSON.stringify(cap, null, 2) + '\n')
         return cap

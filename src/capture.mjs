@@ -181,9 +181,11 @@ const VOLATILE = /signature|(^|[-_])sig($|[-_])|(^|[-_])signed|nonce|timestamp|h
 
 const responseValues = (text) => {
     const out = new Set()
+    // Short ones too: {"id":42} then /items/42/publish. A coincidence only
+    // sends the flow through the page. 0 and 1 are flags far more often.
     const walk = (v) => {
-        if (typeof v === 'string' && v.length >= 6) out.add(v)
-        else if (typeof v === 'number' && Math.abs(v) >= 1000) out.add(String(v))
+        if (typeof v === 'string' && v.length >= 2) out.add(v)
+        else if (typeof v === 'number' && Math.abs(v) >= 2) out.add(String(v))
         else if (v && typeof v === 'object') Object.values(v).forEach(walk)
     }
     try { walk(JSON.parse(text)) } catch {}
@@ -192,8 +194,11 @@ const responseValues = (text) => {
 
 // Whether a captured flow can run again without its page. Anything unclear
 // is a reason not to: the page is slower, never wrong.
-export function assess(cap, { wsFrames = 0, binary = false, responses = [], order = [] } = {}) {
+export function assess(cap, { wsFrames = 0, binary = false, responses = [], order = [], typed = [] } = {}) {
     const reasons = []
+    // One parameter would stand for both, and a later edit to one field lost.
+    const texts = typed.map((t) => t.value)
+    if (new Set(texts).size < texts.length) reasons.push('two fields hold the same text')
     if (!cap.requests.length) reasons.push('sends no requests')
     if (wsFrames) reasons.push('talks over a websocket')
     if (binary) reasons.push('sends binary data')
@@ -272,7 +277,8 @@ export async function send(capture, { context, pageFor, values = {}, env = proce
     for (const r of capture.requests) {
         const t = Date.now()
         // Before each request: the one before may have rotated a token.
-        await readAll(false)
+        // attempted says whether anything had gone out if this throws.
+        try { await readAll(false) } catch (e) { throw Object.assign(e, { attempted: results.length }) }
         const once = () => context.request.fetch(fill(r.url, vals), {
             method: r.method,
             headers: Object.fromEntries(Object.entries(r.headers).map(([k, v]) => [k, fill(v, vals)])),

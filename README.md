@@ -231,7 +231,9 @@ Top tabs shown?" scores about 0.8.
 | `shot <path> [--full]` | screenshot |
 | `eval -- <js>` | run a function body in the page and print its result |
 | `send <file> [NAME=value …]` | replay a capture (`act/type --capture FILE`) without the page |
-| `run <file.jevb>` | run a scenario in-process (`--base`, `--pace`, `--no-batch`) |
+| `run <file.jevb>` | run a scenario in-process (`--base`, `--pace`, `--no-batch`, `--via auto\|page\|jev`, `--no-record`) |
+| `save <file.jevb>` | write this session's recent steps as a scenario, selectors included |
+| `export <file.jevb> [--out F]` | write a standalone Playwright script |
 | `close` · `stop` · `status` | end a session · stop everything · show state |
 | `setup` · `update [--check]` · `version` | |
 
@@ -254,6 +256,46 @@ tabs open, so a page you're signed in to stays put; `close` closes its tab.
 Set `JEVB_CLOSE_TABS=1` to close jevb's tabs on idle and `stop` too.
 jevb opens its tabs in the background, so the browser window never jumps to
 the front while you work; set `JEVB_FOREGROUND=1` to focus them instead.
+
+## Repeats without the model
+
+`jevb run` gets cheaper each time, on its own. It picks the cheapest way that
+is safe for each flow, and every result says which it used (`via`, `why`).
+
+| Way | Used when | Fake-Jev test shop |
+|---|---|---|
+| **Jev** picks each control | first run, or a step with no working selector | 4.3s (recording) |
+| **Selectors** recorded in the file | the flow reads the page (`check`, `read`, `shot`), or can't be sent safely | 2.1s, no picks |
+| **Send** the requests, no page | the flow only puts data in, and its capture passed every test below | 0.3–0.5s |
+
+The first run writes a selector onto each step:
+
+```
+act click Log in  @@ role=button[name="Log in"s]
+```
+
+A selector that no longer finds exactly one visible element makes that step
+ask Jev and repairs the line. Intents that mean "whichever is there now"
+(`first`, `latest`, `next`...) are never recorded, and neither is a selector for
+one of more than 3 look-alikes, like a Reply button in a feed. Checks still go
+to Jev: they're judgments.
+
+**A flow is sent only if** it has no step that reads the page, no `act?`, runs
+in a browser at a non-human pace, was recorded on this host with these steps,
+and its capture shows no: websocket traffic, file upload or binary data,
+signature, nonce, timestamp or other per-request field, value computed in the
+page, value from an earlier response, credential with no known source, or
+request that never finished. Anything else uses the page: slower, never wrong.
+
+**If a send fails:** a 4xx on the first request means nothing happened, so the
+flow runs through the page and the capture isn't trusted again. A 5xx, a timeout,
+a later failure or a changed status may have taken effect, so the run fails
+and nothing is repeated.
+
+`--via page` never sends, `--via jev` ignores selectors, `--no-record` leaves
+the file alone. `jevb save flow.jevb` writes the steps you just drove by
+hand, selectors included. `jevb export flow.jevb` writes a plain Playwright
+script with no jevb and no model.
 
 ## Capture once, replay without the page
 

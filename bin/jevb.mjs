@@ -51,6 +51,11 @@ const USAGE = `jevb <command> [args] [--pace human|agent|fast] [--fast] [--sessi
   update [--check]                 install the latest GitHub release (--check: only report)
   version
   run <scenario.jevb> [--base URL] [--device NAME --app FILE]
+                                   [--via auto|page|jev] [--no-record]
+                                   records selectors in the file, then repeats
+                                   with no model; sends requests when safe
+  save <file.jevb>                 this session's recent steps, with selectors
+  export <file.jevb> [--out F]     a plain Playwright script
                                    run a scenario file in-process (for tests);
                                    consecutive checks batch into one Jev call
                                    (--no-batch to compare)
@@ -78,7 +83,7 @@ function parseArgs(argv) {
         else if (a.startsWith('--')) {
             const k = a.slice(2)
             const next = argv[i + 1]
-            if (['enter', 'full', 'help', 'no-batch', 'attach', 'fast'].includes(k)) flags[k] = true
+            if (['enter', 'full', 'help', 'no-batch', 'attach', 'fast', 'no-record'].includes(k)) flags[k] = true
             else if (k === 'check' || k === 'refute') { (flags[k] ||= []).push(next); i++ }
             else { flags[k] = next; i++ }
         } else pos.push(a)
@@ -143,10 +148,17 @@ async function main() {
     if (cmd === 'serve') return (await import('../src/daemon.mjs')).serve()
     if (cmd === 'run') {
         const { runScenario } = await import('../src/scenario.mjs')
-        const { failed, videos, totalMs, jevCalls, jevTokens } = await runScenario(pos[0], { pace: flags.pace, baseUrl: flags.base, batch: !flags['no-batch'], device: flags.device, app: flags.app, onStep: (r) => console.log(JSON.stringify(r)) })
-        console.log(JSON.stringify({ done: true, failed, totalMs, jevCalls, jevTokens, videos }))
+        const { failed, videos, totalMs, jevCalls, jevTokens, via, scripted, healed } = await runScenario(pos[0], { pace: flags.pace, baseUrl: flags.base, batch: !flags['no-batch'], device: flags.device, app: flags.app, via: flags.via, record: !flags['no-record'], onStep: (r) => console.log(JSON.stringify(r)) })
+        console.log(JSON.stringify({ done: true, failed, via, scripted, healed, totalMs, jevCalls, jevTokens, videos }))
         process.exitCode = failed ? 1 : 0
         return
+    }
+    if (cmd === 'export') {
+        const { parse } = await import('../src/scenario.mjs')
+        const { toPlaywright } = await import('../src/script.mjs')
+        const out = flags.out || `${pos[0].replace(/\.jevb$/, '')}.playwright.mjs`
+        fs.writeFileSync(out, toPlaywright(parse(fs.readFileSync(pos[0], 'utf8')), { baseUrl: flags.base }))
+        return print({ exported: out })
     }
     if (cmd === 'stop') {
         try { print((await call('stop')).body) } catch { print({ stopped: false, reason: 'not running' }) }
@@ -166,6 +178,7 @@ async function main() {
         act: { ...common, intent: text, ...captureTo },
         type: { ...common, intent: text, text: (rest || []).join(' '), submit: !!flags.enter, as: flags.as, ...captureTo },
         send: cmd === 'send' && sendArgs(common, pos),
+        save: { session: flags.session, file: path.resolve(pos[0] || 'flow.jevb') },
         press: { ...common, key: pos[0] },
         launch: { ...common, app: pos[0] },
         scroll: { ...common, dy: pos[0] },

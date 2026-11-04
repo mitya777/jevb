@@ -10,6 +10,7 @@ import { judge, pickText, waitForChecks, waitUntil } from './judge.mjs'
 import * as pace from './pace.mjs'
 import { ACTIONS, trackBusy } from './idle.mjs'
 import { pageState, readState, shortlist, snapshot } from './snapshot.mjs'
+import { isRelative, stableLocator } from './script.mjs'
 
 const DEFAULT_IDLE_MS = Number(process.env.JEVB_IDLE_MS || 120_000)
 // Attach to an already-running Chrome (see bin/jevb-chrome.sh) instead of
@@ -21,6 +22,9 @@ const CDP_URL = process.env.JEVB_CDP_URL || null
 const CLOSE_TABS = process.env.JEVB_CLOSE_TABS === '1'
 const FOREGROUND = process.env.JEVB_FOREGROUND === '1'
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+// How long a recorded selector gets to appear before the step asks Jev.
+const SCRIPT_WAIT_MS = Number(process.env.JEVB_SCRIPT_WAIT_MS || 3_000)
 
 export class JevBrowser {
     constructor({ idleMs = DEFAULT_IDLE_MS, pace: p, headless = process.env.JEVB_HEADED !== '1',
@@ -180,8 +184,20 @@ export class JevBrowser {
     // Jev picks which element an intent refers to. Low confidence or "none"
     // throws with the top candidates (and any batched check results) so the
     // calling agent can rephrase.
-    async find(intent, { session, checks } = {}) {
+    // script: a recorded selector. It's used with no model if it finds exactly
+    // one visible element in time; otherwise Jev picks and target.healed says
+    // the selector needs replacing. Jev's picks carry target.locator, the
+    // selector a repeat of this step can use.
+    async find(intent, { session, checks, script } = {}) {
         const page = await this.page(session)
+        if (script) {
+            const scripted = page.locator(script)
+            const there = await scripted.waitFor({ state: 'visible', timeout: SCRIPT_WAIT_MS }).then(() => true, () => false)
+            if (there) {
+                const checkResults = checks?.length ? await this.checks(checks, { session }) : []
+                return { page, locator: scripted, target: { via: 'script', locator: script }, checks: checkResults, scripted: true }
+            }
+        }
         const weak = (t) => t.id === 'none' || t.confidence < this.minConfidence
         // Wait until the target is on screen and the ride-along checks pass,
         // or JEVB_WAIT_MS ends (see waitUntil).
@@ -191,12 +207,23 @@ export class JevBrowser {
         if (weak(target)) {
             throw Object.assign(new Error(`no confident match for "${intent}"`), { code: 'NO_MATCH', detail: target, checks: checkResults })
         }
+        if (!isRelative(intent)) {
+            const avoid = (this.typed.get(session || 'default') || []).map((t) => t.value)
+            target.locator = await stableLocator(page, target.id, { avoid })
+        }
+        if (script) target.healed = true
         return { page, locator: page.locator(`[data-jevb="${target.id}"]`), target, checks: checkResults }
     }
 
-    async act(intent, { session, pace: p, checks, capture: file } = {}) {
+    // quick: the next step finds its own target by selector, so a click that
+    // stays on the page needn't wait for it to settle, only for the requests
+    // it started. A new page always settles: its target being visible doesn't
+    // mean it has finished rendering, and a late render wipes what was typed.
+    async act(intent, { session, pace: p, checks, capture: file, script, quick: wantQuick } = {}) {
         const pc = pace.resolvePace(p || this.pace)
-        const { page, locator, target, checks: checkResults } = await this.find(intent, { session, checks })
+        let found = await this.find(intent, { session, checks, script })
+        const { page } = found
+        const quick = wantQuick && found.scripted && pc === 'fast'
         // Some clicks navigate a beat later (after an analytics call, say).
         // Watch for a main-frame navigation request briefly and wait it out.
         // A navigation *request* comes before the new document commits, and
@@ -225,20 +252,27 @@ export class JevBrowser {
             }
             return false
         }
-        const quiet = () => sleep(500).then(drain)
+        const quiet = () => sleep(quick ? 100 : 500).then(drain)
         if (pc === 'fast') { page.on('requestfinished', onDone); page.on('requestfailed', onDone) }
         const committed = page.waitForEvent('framenavigated', { predicate: (f) => f === page.mainFrame(), timeout: 15_000 }).catch(() => null)
         const rec = file && await this.startCapture(page)
-        await pace.click(page, locator, pc)
+        try { await pace.click(page, found.locator, pc) } catch (e) {
+            if (!found.scripted) throw e
+            // Found but not clickable (covered, disabled): the page changed.
+            found = await this.find(intent, { session, checks })
+            found.target.healed = true
+            await pace.click(page, found.locator, pc)
+        }
+        const { target, checks: checkResults } = found
         clickedAt = Date.now()
         const nav = pc === 'fast' ? Promise.race([navigated, quiet()]) : navigated
-        await pace.settle(page, pc)
+        if (!quick) await pace.settle(page, pc)
         let went = await nav
         if (!went && pc === 'fast') {
             // A fetch or a navigation can start after quiet() ended, during settle.
             await drain()
             went = navRequested
-            if (!went && fetched) await pace.textSettled(page)
+            if (!went && fetched && !quick) await pace.textSettled(page)
         }
         if (went) {
             await committed
@@ -252,15 +286,22 @@ export class JevBrowser {
     }
 
     // as: the parameter name a later capture gives this text (default TEXT_n).
-    async type(intent, text, { session, pace: p, submit = false, checks, as, capture: file } = {}) {
+    async type(intent, text, { session, pace: p, submit = false, checks, as, capture: file, script } = {}) {
         const pc = pace.resolvePace(p || this.pace)
-        const { page, locator, target, checks: checkResults } = await this.find(intent, { session, checks })
+        let found = await this.find(intent, { session, checks, script })
+        const { page } = found
         const typed = (this.typed.get(session || 'default') || []).filter((t) => t.name !== as)
         typed.push({ name: as || `TEXT_${typed.length + 1}`, value: text })
         this.typed.set(session || 'default', typed)
         // Before typing: a live search or autosave sends while keys go in.
         const rec = file && await this.startCapture(page)
-        await pace.type(page, locator, text, pc)
+        try { await pace.type(page, found.locator, text, pc) } catch (e) {
+            if (!found.scripted) throw e
+            found = await this.find(intent, { session, checks })
+            found.target.healed = true
+            await pace.type(page, found.locator, text, pc)
+        }
+        const { target, checks: checkResults } = found
         if (submit) { await pace.press(page, 'Enter', pc); await pace.settle(page, pc) }
         return { typed: target, chars: text.length, checks: checkResults, ...(rec && { captured: await this.finishCapture({ ...rec, lastPerEndpoint: true }, file, session) }) }
     }
@@ -327,6 +368,84 @@ export class JevBrowser {
     }
 
     // ---- capture / send (see capture.mjs) ---------------------------------
+
+    // A whole flow's capture, recorded passively while jevb run drives it.
+    // Only requests inside an input step count, so a page's background
+    // polling isn't mistaken for the action.
+    startFlow() {
+        this.flow = { reqs: [], done: new Set(), sources: [], ws: 0, on: false, pages: new WeakSet(), at: null }
+    }
+
+    async flowAttach(session) {
+        const f = this.flow
+        if (!f) return null
+        const page = await this.page(session)
+        if (f.pages.has(page)) return page
+        f.pages.add(page)
+        page.on('request', (r) => {
+            if (!f.on) return
+            const type = r.resourceType()
+            if (type === 'fetch' || type === 'xhr' || (type === 'document' && r.method() !== 'GET')) f.reqs.push({ r, at: f.at })
+        })
+        const finished = (r) => f.done.add(r)
+        page.on('requestfinished', finished)
+        page.on('requestfailed', finished)
+        page.on('websocket', (ws) => ws.on('framesent', () => { if (f.on) f.ws++ }))
+        return page
+    }
+
+    async flowStep(fn, session) {
+        const f = this.flow
+        if (!f) return fn()
+        const page = await this.flowAttach(session)
+        if (page.url() !== 'about:blank') f.sources.push(...await capture.tokenSources(page))
+        f.at = page.url()
+        f.on = true
+        try { return await fn() } finally {
+            f.on = false
+        }
+    }
+
+    // Writes the capture with its verdict on whether it's safe to replay.
+    async finishFlow(file, { session, hash }) {
+        const f = this.flow
+        this.flow = null
+        if (!f) return null
+        for (let t = Date.now(); f.reqs.some(({ r }) => !f.done.has(r)) && Date.now() - t < 5_000;) await sleep(50)
+        const seen = []
+        for (const { r, at } of f.reqs) {
+            if (r.redirectedFrom()) continue
+            const headers = await r.allHeaders().catch(() => null)
+            if (!headers || headers['sec-fetch-site'] === 'cross-site') continue
+            // An unfinished request can lack that header: a different host is
+            // third-party here too (a stuck analytics call isn't the action).
+            if (!headers['sec-fetch-site'] && /^https?:/.test(at) && new URL(r.url()).hostname !== new URL(at).hostname) continue
+            // Only finished ones: a stream or long poll's body never ends.
+            if (!f.done.has(r)) { seen.push({ r, at, headers, status: null, text: '' }); continue }
+            const res = await r.response().catch(() => null)
+            const text = await Promise.race([res?.text().catch(() => ''), sleep(1_000).then(() => '')])
+            seen.push({ r, at, headers, status: res?.status() ?? null, text: text ?? '' })
+        }
+        const writes = seen.filter((x) => !['GET', 'HEAD', 'OPTIONS'].includes(x.r.method()))
+        const typed = this.typed.get(session || 'default') || []
+        const page = writes[0]?.at || f.at || 'about:blank'
+        const cap = capture.build({
+            page: /^https?:/.test(page) ? page : 'http://invalid/',
+            params: typed,
+            sources: f.sources,
+            requests: writes.map((x) => ({ method: x.r.method(), url: x.r.url(), headers: x.headers, body: x.r.postData() })),
+        })
+        cap.requests.forEach((c, i) => { c.status = writes[i].status })
+        cap.hash = hash
+        cap.replay = capture.assess(cap, {
+            wsFrames: f.ws,
+            binary: writes.some((x) => x.r.postDataBuffer() && x.r.postData() == null),
+            responses: seen.map((x) => ({ index: writes.indexOf(x), order: seen.indexOf(x), text: x.text })),
+            order: writes.map((x) => seen.indexOf(x)),
+        })
+        fs.writeFileSync(file, JSON.stringify(cap, null, 2) + '\n')
+        return cap
+    }
 
     // Token sources are read before the action: a login or checkout can
     // rotate them, and the request carried the old ones.

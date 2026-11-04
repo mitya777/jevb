@@ -175,6 +175,52 @@ export function build({ page, requests, params, sources }) {
     }
 }
 
+// Fields a client computes per request: a replay of the captured value would
+// be refused, or worse, accepted twice.
+const VOLATILE = /signature|(^|[-_])sig($|[-_])|(^|[-_])signed|nonce|timestamp|hmac|raw[-_]?tx|idempotency|request[-_]?id/i
+
+const responseValues = (text) => {
+    const out = new Set()
+    const walk = (v) => {
+        if (typeof v === 'string' && v.length >= 6) out.add(v)
+        else if (typeof v === 'number' && Math.abs(v) >= 1000) out.add(String(v))
+        else if (v && typeof v === 'object') Object.values(v).forEach(walk)
+    }
+    try { walk(JSON.parse(text)) } catch {}
+    return out
+}
+
+// Whether a captured flow can run again without its page. Anything unclear
+// is a reason not to: the page is slower, never wrong.
+export function assess(cap, { wsFrames = 0, binary = false, responses = [], order = [] } = {}) {
+    const reasons = []
+    if (!cap.requests.length) reasons.push('sends no requests')
+    if (wsFrames) reasons.push('talks over a websocket')
+    if (binary) reasons.push('sends binary data')
+    const unsourced = cap.params.filter((p) => /^(HEADER|FIELD)_/.test(p))
+    if (unsourced.length) reasons.push(`no known source for ${unsourced.join(', ')}`)
+    cap.requests.forEach((r, i) => {
+        const body = r.body || ''
+        if (r.status == null) reasons.push(`${r.method} ${r.url.split('?')[0]} never finished`)
+        if (/filename="/.test(body)) reasons.push('uploads a file')
+        const literal = (k, v) => VOLATILE.test(k) && !String(v).includes('{{')
+        for (const [k, v] of Object.entries(r.headers)) if (literal(k, v)) reasons.push(`one-time header ${k}`)
+        let fields = []
+        try { fields = Object.entries(JSON.parse(body.replace(/\{\{[^}]+\}\}/g, 'x'))) } catch { fields = [...new URLSearchParams(body)] }
+        for (const [k, v] of fields) if (literal(k, v)) reasons.push(`one-time field ${k}`)
+        const stripped = `${r.url} ${body}`.replace(/\{\{[^}]+\}\}/g, '')
+        if (/[A-Fa-f0-9]{40,}|[A-Za-z0-9+_-]{64,}/.test(stripped)) reasons.push('holds a value computed in the page')
+        // A value the server handed back earlier in the flow (a new id).
+        for (const res of responses) {
+            if (res.order >= order[i]) continue
+            for (const v of responseValues(res.text)) {
+                if (new RegExp(`(^|[^A-Za-z0-9])${v.replace(/[.*+?^\${}()|[\]\\]/g, '\\$&')}($|[^A-Za-z0-9])`).test(stripped)) reasons.push(`uses "${v.slice(0, 24)}" from an earlier response`)
+            }
+        }
+    })
+    return { ok: reasons.length === 0, reasons: [...new Set(reasons)] }
+}
+
 const fill = (s, values) => s?.replace(/\{\{([^|}]+)\|(\w+)\}\}/g, (_, key, enc) => {
     if (values[key] == null) throw Object.assign(new Error(`${key} has no value: pass ${key}=... or set it in the env`), { code: 'MISSING_PARAM' })
     return ENCODERS[enc](values[key])

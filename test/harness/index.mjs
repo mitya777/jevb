@@ -192,6 +192,7 @@ $('#list').onclick = async () => {
     }
     return {
         orders, sessions,
+        fail: null, // a status for POST /api/orders to answer with, after taking the order
         async handle(req, res) {
             const url = new URL(req.url, 'http://x')
             if (url.pathname === '/shop.html') {
@@ -226,7 +227,7 @@ $('#list').onclick = async () => {
                 if (!csrf.has(req.headers['x-csrf-token'])) return json(res, 403, { error: 'bad csrf' }), true
                 const o = { id: orders.length + 1, user, ...JSON.parse(await body(req)) }
                 orders.push(o)
-                return json(res, 201, o), true
+                return json(res, this.fail || 201, o), true
             }
             if (url.pathname === '/api/orders') {
                 if (!keys.has((req.headers.authorization || '').replace(/^Bearer /, ''))) return json(res, 401, { error: 'bad key' }), true

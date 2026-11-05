@@ -17,10 +17,11 @@
 const MIN_TOKEN = 12
 // Header names whose values are credentials. One left as a literal after
 // templating becomes a parameter instead of being written to the file.
-const SECRET_HEADER = /auth|token|csrf|xsrf|session|secret|key|signature/i
+const SECRET_HEADER = /auth|token|csrf|xsrf|session|secret|key|signature|^client$|^uid$|^expiry$/i
 // Body fields the same way (plus passwords); see secretFields().
 const SECRET_FIELD = /auth|token|csrf|xsrf|session|secret|key|signature|passw/i
-const DROP_HEADER = /^(:|cookie$|host$|content-length$|connection$|accept-encoding$)/i
+// if-none-match: a replay wants the answer, not a 304 against an old copy.
+const DROP_HEADER = /^(:|cookie$|host$|content-length$|connection$|accept-encoding$|if-none-match$|if-modified-since$)/i
 
 const ENCODERS = {
     raw: (v) => v,
@@ -194,9 +195,8 @@ const responseValues = (text) => {
 
 // Whether a captured flow can run again without its page. Anything unclear
 // is a reason not to: the page is slower, never wrong.
-export function assess(cap, { wsFrames = 0, binary = false, responses = [], order = [], typed = [], crossSite = [] } = {}) {
+export function assess(cap, { wsFrames = 0, binary = false, responses = [], order = [], typed = [] } = {}) {
     const reasons = []
-    if (crossSite.length) reasons.push(`writes to another site: ${crossSite.join(', ')}`)
     // One parameter would stand for both, and a later edit to one field lost.
     const texts = typed.map((t) => t.value)
     if (new Set(texts).size < texts.length) reasons.push('two fields hold the same text')
@@ -220,6 +220,9 @@ export function assess(cap, { wsFrames = 0, binary = false, responses = [], orde
         const query = r.url.includes('?') ? [...new URLSearchParams(r.url.slice(r.url.indexOf('?') + 1))] : []
         for (const [k, v] of [...fields, ...query]) if (literal(k, v)) reasons.push(`one-time field ${k}`)
         const stripped = `${r.url} ${body}`.replace(/\{\{[^}]+\}\}/g, '')
+        // An id in the request itself: the page may have made it (Treechat
+        // names a new thread before posting it), so a replay would reuse it.
+        if (/\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/i.test(stripped)) reasons.push('holds a fixed id, possibly made in the page')
         if (/[A-Fa-f0-9]{40,}|[A-Za-z0-9+_-]{64,}/.test(stripped)) reasons.push('holds a value computed in the page')
         // A value the server handed back earlier in the flow (a new id).
         for (const res of responses) {
@@ -245,7 +248,8 @@ async function readSource(src, { context, pageFor, reload }) {
     }
     // sessionStorage belongs to one tab: read it from the session's own.
     const page = await pageFor(src.origin, { reload, tab: src.from === 'sessionStorage' })
-    return page.evaluate((src) => {
+    // Scripts can set it a beat after load (a bootstrap global, say).
+    const read = () => page.evaluate((src) => {
         if (src.from === 'meta') return document.querySelector(`meta[name="${CSS.escape(src.name)}"]`)?.content
         if (src.from === 'input') return document.querySelector(`input[type=hidden][name="${CSS.escape(src.name)}"]`)?.value
         let v = src.from === 'global' ? window[src.name] : (src.from === 'localStorage' ? localStorage : sessionStorage).getItem(src.key)
@@ -253,6 +257,9 @@ async function readSource(src, { context, pageFor, reload }) {
         if (typeof v === 'string') { try { v = JSON.parse(v) } catch { return undefined } }
         return v?.[src.path]
     }, src)
+    let value = await read()
+    for (let t = Date.now(); value == null && Date.now() - t < 3_000; value = await read()) await new Promise((r) => setTimeout(r, 100))
+    return value
 }
 
 // Replays a capture through the context's own request client (its cookie

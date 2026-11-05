@@ -417,16 +417,14 @@ export class JevBrowser {
             await sleep(500)
         }
         const seen = []
-        const crossSite = new Set()
         const endpoint = (x) => { const u = new URL(x.r.url()); return `${x.r.method()} ${u.origin}${u.pathname}` }
         const kept = f.reqs.filter((x, i) => !x.step?.typing || !f.reqs.slice(i + 1).some((y) => y.step === x.step && endpoint(y) === endpoint(x)))
         for (const { r, at } of kept) {
             if (r.redirectedFrom()) continue
             const headers = await r.allHeaders().catch(() => null)
-            // A readable write to another site can be the action itself. An
-            // analytics ping is no-cors: it can't read the answer anyway.
-            if (headers?.['sec-fetch-site'] === 'cross-site' && headers['sec-fetch-mode'] === 'cors' && !['GET', 'HEAD', 'OPTIONS'].includes(r.method())) crossSite.add(new URL(r.url()).hostname)
-            if (!headers || headers['sec-fetch-site'] === 'cross-site') continue
+            // An app's API is often on another domain, and that's the action.
+            // An analytics ping is no-cors: it can't read the answer anyway.
+            if (!headers || (headers['sec-fetch-site'] === 'cross-site' && headers['sec-fetch-mode'] !== 'cors')) continue
             // An unfinished request can lack that header: a different host is
             // third-party here too (a stuck analytics call isn't the action).
             if (!headers['sec-fetch-site'] && /^https?:/.test(at) && new URL(r.url()).hostname !== new URL(at).hostname) continue
@@ -452,7 +450,6 @@ export class JevBrowser {
         cap.hash = hash
         cap.replay = capture.assess(cap, {
             wsFrames: f.ws,
-            crossSite: [...crossSite],
             binary: writes.some((x) => x.r.postDataBuffer() && x.r.postData() == null),
             responses: seen.map((x) => ({ index: writes.indexOf(x), order: seen.indexOf(x), text: x.text })),
             order: writes.map((x) => seen.indexOf(x)),
@@ -492,11 +489,12 @@ export class JevBrowser {
         page.off('requestfinished', onDone)
         page.off('requestfailed', onDone)
         // Third-party calls (analytics, ads) aren't part of the action: the
-        // browser's own same-site verdict (public-suffix aware) decides.
+        // browser's own verdict decides (public-suffix aware), keeping CORS
+        // calls, since an app's API is often on another domain.
         // Redirect hops aren't either: send follows redirects itself, and
         // replaying a hop too would run a POST twice.
         const seen = await Promise.all(reqs.filter((r) => !r.redirectedFrom()).map(async (r) => ({ r, headers: await r.allHeaders() })))
-        let own = seen.filter(({ headers }) => headers['sec-fetch-site'] !== 'cross-site')
+        let own = seen.filter(({ headers }) => headers['sec-fetch-site'] !== 'cross-site' || headers['sec-fetch-mode'] === 'cors')
         if (lastPerEndpoint) {
             const key = ({ r }) => `${r.method()} ${new URL(r.url()).origin}${new URL(r.url()).pathname}`
             own = own.filter((x, i) => !own.slice(i + 1).some((y) => key(y) === key(x)))

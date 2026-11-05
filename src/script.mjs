@@ -33,6 +33,9 @@ function candidates(id) {
     // Generated ids change between builds.
     if (el.id && !/\d{3,}|[a-f0-9]{8,}|^:|^radix-|^react-/i.test(el.id)) out.push(`#${CSS.escape(el.id)}`)
     if (!role && name && name.length <= 80) out.push(`text=${q(name)}`)
+    // An editor with no name: a readable class. CSS-module and utility
+    // names change between builds, and stableLocator checks it's unique.
+    for (const c of el.classList) if (/^[A-Za-z][A-Za-z-]{3,}$/.test(c) && !/^(flex|grid|block|hidden|active|selected)/.test(c)) out.push(`${tag}.${CSS.escape(c)}`)
     return out
 }
 

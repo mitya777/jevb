@@ -141,7 +141,7 @@ test('a flow with a check always uses the page', async () => {
 })
 
 test('assess: what makes a capture unsafe to replay', () => {
-    const req = (o = {}) => ({ method: 'POST', url: 'https://x.test/a', headers: {}, status: 200, ...o })
+    const req = (o = {}) => ({ method: "POST", url: "https://x.test/a", headers: {}, status: 200, ...o })
     const cap = (requests, params = []) => ({ requests, params })
     assert.deepEqual(assess(cap([req({ body: '{"a":"b"}' })]), { order: [0] }), { ok: true, reasons: [] })
     const why = (c, o = {}) => assess(c, { order: c.requests.map((_, i) => i), ...o }).reasons.join('; ')

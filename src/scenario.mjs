@@ -197,12 +197,14 @@ export async function runScenario(file, { pace, baseUrl, batch = true, onStep = 
                     }
                     case 'capture': captureNext = path.resolve(s.arg); out = { capture: captureNext }; break
                     case 'send': {
-                        const [file, ...kv] = s.arg.split(/\s+/)
+                        const [file, ...rest] = s.arg.split(/\s+/)
+                        const force = rest.includes('--force')
+                        const kv = rest.filter((x) => x !== '--force')
                         const values = Object.fromEntries(kv.map((x) => [x.slice(0, x.indexOf('=')), expand(x.slice(x.indexOf('=') + 1))]))
                         // Parameters not given come from the env, as ${NAME} would:
                         // a missing one fails here, and results never echo them.
                         for (const p of JSON.parse(fs.readFileSync(path.resolve(file), 'utf8')).params || []) values[p] ??= expand(`\${${p}}`)
-                        out = await b.send(path.resolve(file), { values })
+                        out = await b.send(path.resolve(file), { values, force })
                         if (!out.ok) throw Object.assign(new Error(`send ${file}: ${out.results.map((r) => r.status).join(', ')}`), { detail: out.results })
                         break
                     }

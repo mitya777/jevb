@@ -297,6 +297,12 @@ the file alone. `jevb save flow.jevb` writes the steps you just drove by
 hand, selectors included. `jevb export flow.jevb` writes a plain Playwright
 script with no jevb and no model.
 
+**A 200 doesn't prove it happened.** On a real app, replaying a post with the
+thread id the page had generated got 200s on every request and added
+nothing. That's why `send` refuses a capture whose verdict is unsafe unless
+you pass `--force`, and why a flow with no check can't show that its action
+worked: add a `check` when it matters (it uses the page, not `send`).
+
 ## Capture once, replay without the page
 
 Once a flow works, most of its time is the page: rendering, waiting, Jev

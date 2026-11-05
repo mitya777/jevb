@@ -503,6 +503,7 @@ export class JevBrowser {
         const requests = own.map(({ r, headers }) => ({ method: r.method(), url: r.url(), headers, body: r.postData() }))
         const after = page.isClosed() ? [] : await capture.tokenSources(page)
         const cap = capture.build({ page: at, requests, params: this.typed.get(session || 'default') || [], sources: [...sources, ...after] })
+        cap.replay = capture.assess(cap)
         fs.writeFileSync(file, JSON.stringify(cap, null, 2) + '\n')
         return { file, requests: cap.requests.map((r) => `${r.method} ${r.url}`), params: cap.params }
     }
@@ -511,9 +512,15 @@ export class JevBrowser {
     // tokens read fresh from the captured page, opened once in the
     // background and kept for the next send. Not a session's page: one on
     // the same origin can be a result page without the token.
-    async send(file, { session, values } = {}) {
+    // A capture its verdict calls unsafe is refused without force: on staging
+    // Treechat answered 200 to a replayed thread id and added nothing, so a
+    // clean run of 200s doesn't show the action happened.
+    async send(file, { session, values, force = false } = {}) {
         const cap = JSON.parse(fs.readFileSync(file, 'utf8'))
         if (cap.jevb !== 'capture/1') throw new Error(`${file} is not a jevb capture`)
+        if (cap.replay && !cap.replay.ok && !force) {
+            throw Object.assign(new Error(`not safe to replay: ${cap.replay.reasons.join('; ')}. A 200 may not mean it happened. --force sends it anyway`), { code: 'NOT_REPLAYABLE' })
+        }
         const context = (await this.page(session)).context()
         const sessionPage = await this.page(session)
         const pageFor = async (origin, { reload, tab } = {}) => {

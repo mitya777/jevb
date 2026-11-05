@@ -245,3 +245,31 @@ test('a cookie-backed CSRF token is bootstrapped from the captured page in a fre
         assert.equal(r.ok, true, JSON.stringify(r))
     } finally { await b2.shutdown() }
 })
+
+test('an expiry stored beside a token is read fresh, not asked for', async () => {
+    const { tokenSources } = await import('../src/capture.mjs')
+    const b = new JevBrowser({ pace: 'fast' })
+    try {
+        await b.open(site.url('shop.html'))
+        const page = await b.page()
+        await page.evaluate(() => localStorage.setItem('session', JSON.stringify({ token: 'abcdefghijklmnop', expiry: 1790000000 })))
+        const found = await tokenSources(page)
+        const cap = build({ page: page.url(), params: [], sources: found, requests: [{ method: 'GET', url: site.url('api/x'), headers: { expiry: '1790000000', 'access-token': 'abcdefghijklmnop' } }] })
+        assert.deepEqual(cap.params, [])
+        assert.match(cap.requests[0].headers.expiry, /^\{\{@\d+\|raw\}\}$/)
+    } finally { await b.shutdown() }
+})
+
+test('send refuses a capture its verdict calls unsafe, unless forced', async () => {
+    const f = file('fixed-id.json')
+    fs.writeFileSync(f, JSON.stringify(build({ page: site.url('shop.html'), params: [], sources: [], requests: [] })))
+    const cap = build({ page: site.url('shop.html'), params: [], sources: [], requests: [{ method: 'POST', url: site.url('api/collect'), headers: {}, body: 'id=d5cd4dbb-0fe5-4368-bb14-552a5a0d8367' }] })
+    cap.replay = (await import('../src/capture.mjs')).assess(cap)
+    assert.equal(cap.replay.ok, false)
+    fs.writeFileSync(f, JSON.stringify(cap))
+    const b = new JevBrowser({ pace: 'fast' })
+    try {
+        await assert.rejects(b.send(f), { code: 'NOT_REPLAYABLE' })
+        assert.equal((await b.send(f, { force: true })).results[0].status, 204)
+    } finally { await b.shutdown() }
+})

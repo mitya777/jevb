@@ -45,7 +45,13 @@ export async function tokenSources(page) {
                 add(v, { from: kind, key })
                 try {
                     const o = JSON.parse(v)
-                    if (o && typeof o === 'object') for (const [k, x] of Object.entries(o)) add(x, { from: kind, key, path: k })
+                    if (o && typeof o === 'object') {
+                        for (const [k, x] of Object.entries(o)) {
+                            add(x, { from: kind, key, path: k })
+                            // A session's expiry sits beside its token and is too short to count as one.
+                            if (/expir/i.test(k) && String(x).length >= 8) out.push({ value: String(x), src: { from: kind, key, path: k } })
+                        }
+                    }
                 } catch {}
             }
         }
@@ -211,7 +217,7 @@ export function assess(cap, { wsFrames = 0, binary = false, responses = [], orde
     if (unsourced.length) reasons.push(`no known source for ${unsourced.join(', ')}`)
     cap.requests.forEach((r, i) => {
         const body = r.body || ''
-        if (r.status == null) reasons.push(`${r.method} ${r.url.split('?')[0]} never finished`)
+        if (r.status === null) reasons.push(`${r.method} ${r.url.split('?')[0]} never finished`)
         if (/filename="/.test(body)) reasons.push('uploads a file')
         const literal = (k, v) => VOLATILE.test(k) && !String(v).includes('{{')
         for (const [k, v] of Object.entries(r.headers)) if (literal(k, v)) reasons.push(`one-time header ${k}`)

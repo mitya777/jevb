@@ -26,7 +26,8 @@ const USAGE = `jevb <command> [args] [--pace human|agent|fast] [--fast] [--sessi
                                    [--capture FILE: save the requests it sends]
   type <intent...> -- <text...>    Jev picks the field, then type text [--enter]
                                    [--as NAME: the text's name in a capture]
-  send <file> [NAME=value ...]     replay a capture without the page: this
+  send <file> [NAME=value ...] [--force]
+                                   replay a capture without the page: this
                                    session's cookies, tokens read fresh; other
                                    NAMEs come from the env
   press <key>                      e.g. Enter, Escape, Meta+K; on iOS also
@@ -83,7 +84,7 @@ function parseArgs(argv) {
         else if (a.startsWith('--')) {
             const k = a.slice(2)
             const next = argv[i + 1]
-            if (['enter', 'full', 'help', 'no-batch', 'attach', 'fast', 'no-record'].includes(k)) flags[k] = true
+            if (['enter', 'full', 'help', 'no-batch', 'attach', 'fast', 'no-record', 'force'].includes(k)) flags[k] = true
             else if (k === 'check' || k === 'refute') { (flags[k] ||= []).push(next); i++ }
             else { flags[k] = next; i++ }
         } else pos.push(a)
@@ -115,13 +116,13 @@ const print = (o) => console.log(JSON.stringify(o, null, 2))
 // send <file> NAME=value ...: values from the command line, then from this
 // shell's env for the capture's other parameters (the daemon's env is
 // whatever it started with).
-function sendArgs(common, pos) {
+function sendArgs(common, pos, flags) {
     const file = path.resolve(pos[0] || '')
     const values = Object.fromEntries(pos.slice(1).map((kv) => [kv.slice(0, kv.indexOf('=')), kv.slice(kv.indexOf('=') + 1)]))
     let params = []
     try { params = JSON.parse(fs.readFileSync(file, 'utf8')).params || [] } catch {}
     for (const p of params) if (values[p] == null && process.env[p] != null) values[p] = process.env[p]
-    return { ...common, file, values }
+    return { ...common, file, values, force: !!flags.force }
 }
 
 async function main() {
@@ -177,7 +178,7 @@ async function main() {
         devices: { platform: flags.platform },
         act: { ...common, intent: text, ...captureTo },
         type: { ...common, intent: text, text: (rest || []).join(' '), submit: !!flags.enter, as: flags.as, ...captureTo },
-        send: cmd === 'send' && sendArgs(common, pos),
+        send: cmd === 'send' && sendArgs(common, pos, flags),
         save: { session: flags.session, file: path.resolve(pos[0] || 'flow.jevb') },
         press: { ...common, key: pos[0] },
         launch: { ...common, app: pos[0] },

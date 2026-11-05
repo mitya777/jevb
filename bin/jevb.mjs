@@ -23,7 +23,13 @@ const USAGE = `jevb <command> [args] [--pace human|agent|fast] [--fast] [--sessi
                                    Later commands on that --session drive it.
   devices [--platform ios|android] Device Farm phones you can open
   act <intent...>                  Jev picks the element, then click it
+                                   [--capture FILE: save the requests it sends]
   type <intent...> -- <text...>    Jev picks the field, then type text [--enter]
+                                   [--as NAME: the text's name in a capture]
+  send <file> [NAME=value ...] [--force]
+                                   replay a capture without the page: this
+                                   session's cookies, tokens read fresh; other
+                                   NAMEs come from the env
   press <key>                      e.g. Enter, Escape, Meta+K; on iOS also
                                    Screenshot, ScreenshotEditor
   launch <bundle id|package>       bring another app on the phone to the front
@@ -46,6 +52,11 @@ const USAGE = `jevb <command> [args] [--pace human|agent|fast] [--fast] [--sessi
   update [--check]                 install the latest GitHub release (--check: only report)
   version
   run <scenario.jevb> [--base URL] [--device NAME --app FILE]
+                                   [--via auto|page|jev] [--no-record]
+                                   records selectors in the file, then repeats
+                                   with no model; sends requests when safe
+  save <file.jevb>                 this session's recent steps, with selectors
+  export <file.jevb> [--out F]     a plain Playwright script
                                    run a scenario file in-process (for tests);
                                    consecutive checks batch into one Jev call
                                    (--no-batch to compare)
@@ -73,7 +84,7 @@ function parseArgs(argv) {
         else if (a.startsWith('--')) {
             const k = a.slice(2)
             const next = argv[i + 1]
-            if (['enter', 'full', 'help', 'no-batch', 'attach', 'fast'].includes(k)) flags[k] = true
+            if (['enter', 'full', 'help', 'no-batch', 'attach', 'fast', 'no-record', 'force'].includes(k)) flags[k] = true
             else if (k === 'check' || k === 'refute') { (flags[k] ||= []).push(next); i++ }
             else { flags[k] = next; i++ }
         } else pos.push(a)
@@ -102,6 +113,18 @@ async function ensureDaemon() {
 
 const print = (o) => console.log(JSON.stringify(o, null, 2))
 
+// send <file> NAME=value ...: values from the command line, then from this
+// shell's env for the capture's other parameters (the daemon's env is
+// whatever it started with).
+function sendArgs(common, pos, flags) {
+    const file = path.resolve(pos[0] || '')
+    const values = Object.fromEntries(pos.slice(1).map((kv) => [kv.slice(0, kv.indexOf('=')), kv.slice(kv.indexOf('=') + 1)]))
+    let params = []
+    try { params = JSON.parse(fs.readFileSync(file, 'utf8')).params || [] } catch {}
+    for (const p of params) if (values[p] == null && process.env[p] != null) values[p] = process.env[p]
+    return { ...common, file, values, force: !!flags.force }
+}
+
 async function main() {
     const [cmd, ...argv] = process.argv.slice(2)
     const { flags, pos, rest } = parseArgs(argv)
@@ -126,10 +149,17 @@ async function main() {
     if (cmd === 'serve') return (await import('../src/daemon.mjs')).serve()
     if (cmd === 'run') {
         const { runScenario } = await import('../src/scenario.mjs')
-        const { failed, videos, totalMs, jevCalls, jevTokens } = await runScenario(pos[0], { pace: flags.pace, baseUrl: flags.base, batch: !flags['no-batch'], device: flags.device, app: flags.app, onStep: (r) => console.log(JSON.stringify(r)) })
-        console.log(JSON.stringify({ done: true, failed, totalMs, jevCalls, jevTokens, videos }))
+        const { failed, videos, totalMs, jevCalls, jevTokens, via, scripted, healed } = await runScenario(pos[0], { pace: flags.pace, baseUrl: flags.base, batch: !flags['no-batch'], device: flags.device, app: flags.app, via: flags.via, record: !flags['no-record'], onStep: (r) => console.log(JSON.stringify(r)) })
+        console.log(JSON.stringify({ done: true, failed, via, scripted, healed, totalMs, jevCalls, jevTokens, videos }))
         process.exitCode = failed ? 1 : 0
         return
+    }
+    if (cmd === 'export') {
+        const { parse } = await import('../src/scenario.mjs')
+        const { toPlaywright } = await import('../src/script.mjs')
+        const out = flags.out || `${pos[0].replace(/\.jevb$/, '')}.playwright.mjs`
+        fs.writeFileSync(out, toPlaywright(parse(fs.readFileSync(pos[0], 'utf8')), { baseUrl: flags.base }))
+        return print({ exported: out })
     }
     if (cmd === 'stop') {
         try { print((await call('stop')).body) } catch { print({ stopped: false, reason: 'not running' }) }
@@ -139,14 +169,17 @@ async function main() {
     const batched = [...(flags.check || []).map((q) => ({ question: q })), ...(flags.refute || []).map((q) => ({ question: q, negate: true }))]
     const common = { session: flags.session, pace: flags.pace, ...(batched.length && { checks: batched }) }
     const text = pos.join(' ')
+    const captureTo = flags.capture && { capture: path.resolve(flags.capture) }
     const args = {
         status: {}, snap: common, close: common,
         read: { ...common, question: text || undefined, full: !!flags.full },
         open: { ...common, url: pos[0], device: flags.device, app: flags.app, platform: flags.platform, attach: !!flags.attach },
         eval: { ...common, script: (rest || pos).join(' ') },
         devices: { platform: flags.platform },
-        act: { ...common, intent: text },
-        type: { ...common, intent: text, text: (rest || []).join(' '), submit: !!flags.enter },
+        act: { ...common, intent: text, ...captureTo },
+        type: { ...common, intent: text, text: (rest || []).join(' '), submit: !!flags.enter, as: flags.as, ...captureTo },
+        send: cmd === 'send' && sendArgs(common, pos, flags),
+        save: { session: flags.session, file: path.resolve(pos[0] || 'flow.jevb') },
         press: { ...common, key: pos[0] },
         launch: { ...common, app: pos[0] },
         scroll: { ...common, dy: pos[0] },
@@ -162,7 +195,7 @@ async function main() {
     const { ok, body } = await call(cmd === 'refute' ? 'check' : cmd, args)
     print(body)
     const checkList = cmd === 'checks' ? body : body.checks || (['check', 'refute'].includes(cmd) ? [body] : [])
-    if (!ok || (Array.isArray(checkList) && checkList.some((c) => !c.pass))) process.exitCode = 1
+    if (!ok || (Array.isArray(checkList) && checkList.some((c) => !c.pass)) || body.ok === false) process.exitCode = 1
 }
 
 main().catch((e) => { print({ error: e.message }); process.exitCode = 1 })

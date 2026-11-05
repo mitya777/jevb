@@ -11,6 +11,8 @@
 //   refute is an error message shown?           # passes if noul < 0.3
 //   shot out/after-post.png
 //   read what is the order number?   # the on-screen text that answers, verbatim
+//   capture out/order.json          # the next act/type saves the requests it sends
+//   send out/order.json ITEM=pen    # replay one, no page (see capture.mjs)
 //
 // Real phones (AWS Device Farm, or JEVB_APPIUM_URL): `device` / `app` lines
 // pick what the next `open` starts; `open` with no url launches the app.
@@ -30,10 +32,15 @@ import path from 'node:path'
 import { JevBrowser } from './browser.mjs'
 import { JevDevice } from './device.mjs'
 import { apiKey } from './jev.mjs'
+import { chooseTier, flowHash, onlyPutsData, writeLocators } from './script.mjs'
 
 export function parse(text) {
     return text.split('\n').map((raw, i) => ({ raw, line: i + 1 }))
-        .map((s) => ({ ...s, src: s.raw.replace(/\s+#.*$/, '').trim() }))
+        .map((s) => {
+            // A recorded selector first: it can hold a # of its own.
+            const at = s.raw.match(/^(.*?)\s@@\s(.+?)(\s+#\s.*)?$/)
+            return { ...s, src: (at ? at[1] : s.raw.replace(/\s+#.*$/, '')).trim(), ...(at && { locator: at[2] }) }
+        })
         .filter((s) => s.src && !s.src.startsWith('#'))
         .map((s) => {
             const m = s.src.match(/^(\w+)(\?)?(?:@([\d.]+))?\s*(.*)$/)
@@ -69,7 +76,9 @@ function redact(result) {
     return JSON.parse(json)
 }
 
-export async function runScenario(file, { pace, baseUrl, batch = true, onStep = console.log, device, app } = {}) {
+// via: auto (send when safe, else selectors, else Jev), page (never send), or
+// jev (no selectors either). record: false leaves the file as it is.
+export async function runScenario(file, { pace, baseUrl, batch = true, onStep = console.log, device, app, via = 'auto', record = true } = {}) {
     if (fs.existsSync('.env')) { try { process.loadEnvFile('.env') } catch {} }
     const steps = parse(fs.readFileSync(file, 'utf8'))
     // Fail before renting a phone: a missing key or ${NAME} used to surface
@@ -82,7 +91,16 @@ export async function runScenario(file, { pace, baseUrl, batch = true, onStep = 
     const target = (arg) => (arg && baseUrl ? new URL(arg, baseUrl).href : arg || undefined)
     const results = []
     let failed = 0
+    // `capture <file>` applies to the next act/type (see capture.mjs).
+    let captureNext = null
+    const takeCapture = () => { const c = captureNext; captureNext = null; return c || undefined }
     const started = Date.now()
+    const useLocators = via !== 'jev'
+    const locators = new Map() // line -> selector to write
+    let scripted = 0, healed = 0
+    const ownCapture = steps.some((s) => s.cmd === 'capture' || s.cmd === 'send')
+    const capFile = `${file}.capture.json`
+    const hash = flowHash(steps, baseUrl)
     let lastWorkEnd = started // end of the last non-wait step: trailing waits don't count
     const emit = (r) => { r = redact(r); results.push(r); onStep(r) }
     const emitChecks = (checkSteps, checkResults, ms) => checkSteps.forEach((cs, i) => {
@@ -90,8 +108,63 @@ export async function runScenario(file, { pace, baseUrl, batch = true, onStep = 
         if (!c.pass) failed++
         emit({ line: cs.line, step: cs.src, ms, ...c })
     })
+    const note = (s, target) => {
+        if (!target) return
+        if (target.via === 'script') scripted++
+        if (target.healed) healed++
+        if (record && !onDevice && target.locator && target.locator !== s.locator) locators.set(s.line, target.locator)
+    }
+    // `type x => ${NAME}` is parameter NAME in a capture, else TYPE_n by order.
+    const typeParams = steps.filter((s) => s.cmd === 'type').map((s, n) => {
+        const text = s.arg.split(/\s*=>\s*/)[1] ?? ''
+        return { line: s.line, name: text.trim().match(/^\$\{([A-Z0-9_]+)\}$/)?.[1] || `TYPE_${n + 1}`, text }
+    })
+    const flowCapture = !ownCapture && !onDevice && !b.demo && via !== 'jev' && onlyPutsData(steps)
+    let cap = null
+    try { cap = JSON.parse(fs.readFileSync(capFile, 'utf8')) } catch {}
+    const decision = ownCapture ? { tier: 'page', why: 'the scenario manages its own captures' } : chooseTier({ steps, cap, hash, via, pace: b.pace, demo: b.demo, onDevice })
+    let tier = decision.tier
+    let sent = false
+    onStep({ via: tier, why: decision.why })
     try {
-        for (let i = 0; i < steps.length; i++) {
+        if (tier === 'send') {
+            const values = {}
+            for (const t of typeParams) values[t.name] = expand(t.text)
+            let out = null, refused = null
+            const t = Date.now()
+            try { out = await b.send(capFile, { values }) } catch (e) {
+                if (e.code === 'SOURCE_GONE' && !e.attempted) refused = e.message // nothing went out
+                else {
+                    failed++
+                    emit({ step: `send ${path.basename(capFile)}`, ms: Date.now() - t, error: `${e.message}; not re-run, an earlier request may have taken effect` })
+                    sent = true
+                }
+            }
+            if (out) {
+                const r = out.results
+                // The server turned the very first request down, so nothing
+                // happened: the page can still do it. Anything later or less
+                // clear (5xx, timeout) may have taken effect and never re-runs.
+                if (!out.ok && r.length === 1 && r[0].status >= 400 && r[0].status < 500) refused = `refused with ${r[0].status}`
+                else {
+                    const changed = r.find((x, i) => x.status !== cap.requests[i].status)
+                    const bad = !out.ok || changed
+                    if (bad) failed++
+                    emit({ step: `send ${path.basename(capFile)}`, ms: Date.now() - t, ...out, ...(bad && { error: changed ? `request ${r.indexOf(changed) + 1} of ${cap.requests.length} answered ${changed.status}, recorded ${cap.requests[r.indexOf(changed)].status}; stopped, not re-run` : `stopped at ${r.at(-1).status} after ${r.length} of ${cap.requests.length} requests; not re-run, it may have taken effect` }) })
+                    lastWorkEnd = Date.now()
+                    sent = true
+                }
+            }
+            if (refused) {
+                // Don't try this capture again until the flow is re-recorded.
+                cap.replay = { ok: false, reasons: [refused] }
+                fs.writeFileSync(capFile, JSON.stringify(cap, null, 2) + '\n')
+                tier = 'page'
+                onStep({ via: 'page', why: refused })
+            }
+        }
+        if (!sent && flowCapture && !(cap && cap.hash === hash)) b.startFlow?.()
+        for (let i = 0; !sent && i < steps.length; i++) {
             let s = steps[i]
             let pending = []
             if (isCheck(s)) {
@@ -118,17 +191,40 @@ export async function runScenario(file, { pace, baseUrl, batch = true, onStep = 
                     case 'open': {
                         const opts = { ...deviceOpts }
                         for (const k of Object.keys(deviceOpts)) delete deviceOpts[k]
+                        await b.flowAttach?.()
                         out = await b.open(target(s.arg), opts)
                         break
                     }
-                    case 'act': out = await b.act(s.arg, { checks }); break
+                    case 'capture': captureNext = path.resolve(s.arg); out = { capture: captureNext }; break
+                    case 'send': {
+                        const [file, ...rest] = s.arg.split(/\s+/)
+                        const force = rest.includes('--force')
+                        const kv = rest.filter((x) => x !== '--force')
+                        const values = Object.fromEntries(kv.map((x) => [x.slice(0, x.indexOf('=')), expand(x.slice(x.indexOf('=') + 1))]))
+                        // Parameters not given come from the env, as ${NAME} would:
+                        // a missing one fails here, and results never echo them.
+                        for (const p of JSON.parse(fs.readFileSync(path.resolve(file), 'utf8')).params || []) values[p] ??= expand(`\${${p}}`)
+                        out = await b.send(path.resolve(file), { values, force })
+                        if (!out.ok) throw Object.assign(new Error(`send ${file}: ${out.results.map((r) => r.status).join(', ')}`), { detail: out.results })
+                        break
+                    }
+                    case 'act': {
+                        const opts = { checks, capture: takeCapture(), script: useLocators ? s.locator : undefined, quick: useLocators && !!steps[i + 1]?.locator }
+                        out = await (b.flowStep ? b.flowStep(() => b.act(s.arg, opts)) : b.act(s.arg, opts))
+                        note(s, out.clicked)
+                        break
+                    }
                     case 'type': {
                         const [intent, text] = s.arg.split(/\s*=>\s*/)
-                        out = await b.type(intent, expand(text ?? ''), { checks })
+                        // type x => ${NAME}: a capture names the parameter NAME.
+                        const as = typeParams.find((t) => t.line === s.line).name
+                        const opts = { checks, as, capture: takeCapture(), script: useLocators ? s.locator : undefined }
+                        out = await (b.flowStep ? b.flowStep(() => b.type(intent, expand(text ?? ''), opts), undefined, { typing: true }) : b.type(intent, expand(text ?? ''), opts))
+                        note(s, out.typed)
                         break
                     }
                     case 'read': out = await b.readText({ question: s.arg || undefined }); break
-                    case 'press': out = await b.press(s.arg); break
+                    case 'press': out = await (b.flowStep ? b.flowStep(() => b.press(s.arg)) : b.press(s.arg)); break
                     case 'scroll': out = await b.scroll(s.arg || 600); break
                     case 'wait': await new Promise((r) => setTimeout(r, Number(s.arg))); out = {}; break
                     case 'shot': fs.mkdirSync(path.dirname(s.arg), { recursive: true }); out = await b.screenshot(s.arg); break
@@ -152,8 +248,12 @@ export async function runScenario(file, { pace, baseUrl, batch = true, onStep = 
             await b.showDone(failed ? `FAILED  ${failed}  ·  ${secs}s` : `DONE  ${secs}s`)
             await new Promise((r) => setTimeout(r, 2500)) // hold the banner for viewers/recordings
         }
+        // A failed run's requests say nothing about what the flow should send.
+        if (b.flow && !failed) await b.finishFlow(capFile, { hash })
     } finally {
+        if (b.flow) b.flow = null
+        if (locators.size) { try { writeLocators(file, locators) } catch (e) { onStep({ log: `could not write selectors: ${e.message}` }) } }
         var { videos } = await b.shutdown('scenario done')
     }
-    return { failed, results, videos, jevCalls: b.jevRequests, jevTokens: b.jevTokens, totalMs: lastWorkEnd - started }
+    return { failed, results, videos, via: tier, scripted, healed, jevCalls: b.jevRequests, jevTokens: b.jevTokens, totalMs: lastWorkEnd - started }
 }

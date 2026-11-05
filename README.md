@@ -230,7 +230,10 @@ Top tabs shown?" scores about 0.8.
 | `snap` | the controls Jev chooses from |
 | `shot <path> [--full]` | screenshot |
 | `eval -- <js>` | run a function body in the page and print its result |
-| `run <file.jevb>` | run a scenario in-process (`--base`, `--pace`, `--no-batch`) |
+| `send <file> [NAME=value …]` | replay a capture (`act/type --capture FILE`) without the page |
+| `run <file.jevb>` | run a scenario in-process (`--base`, `--pace`, `--no-batch`, `--via auto\|page\|jev`, `--no-record`) |
+| `save <file.jevb>` | write this session's recent steps as a scenario, selectors included |
+| `export <file.jevb> [--out F]` | write a standalone Playwright script |
 | `close` · `stop` · `status` | end a session · stop everything · show state |
 | `setup` · `update [--check]` · `version` | |
 
@@ -253,6 +256,97 @@ tabs open, so a page you're signed in to stays put; `close` closes its tab.
 Set `JEVB_CLOSE_TABS=1` to close jevb's tabs on idle and `stop` too.
 jevb opens its tabs in the background, so the browser window never jumps to
 the front while you work; set `JEVB_FOREGROUND=1` to focus them instead.
+
+## Repeats without the model
+
+`jevb run` gets cheaper each time, on its own. It picks the cheapest way that
+is safe for each flow, and every result says which it used (`via`, `why`).
+
+| Way | Used when | Fake-Jev test shop |
+|---|---|---|
+| **Jev** picks each control | first run, or a step with no working selector | 4.3s (recording) |
+| **Selectors** recorded in the file | the flow reads the page (`check`, `read`, `shot`), or can't be sent safely | 2.1s, no picks |
+| **Send** the requests, no page | the flow only puts data in, and its capture passed every test below | 0.3–0.5s |
+
+The first run writes a selector onto each step:
+
+```
+act click Log in  @@ role=button[name="Log in"s]
+```
+
+A selector that no longer finds exactly one visible element makes that step
+ask Jev and repairs the line. Intents that mean "whichever is there now"
+(`first`, `latest`, `next`...) are never recorded, and neither is a selector for
+one of more than 3 look-alikes, like a Reply button in a feed. Checks still go
+to Jev: they're judgments.
+
+**A flow is sent only if** it has no step that reads the page, no `act?`, runs
+in a browser at a non-human pace, was recorded on this host with these steps,
+and its capture shows no: websocket traffic, file upload or binary data,
+signature, nonce, timestamp or other per-request field, value computed in the
+page, value from an earlier response, credential with no known source, or
+request that never finished. Anything else uses the page: slower, never wrong.
+
+**If a send fails:** a 4xx on the first request means nothing happened, so the
+flow runs through the page and the capture isn't trusted again. A 5xx, a timeout,
+a later failure or a changed status may have taken effect, so the run fails
+and nothing is repeated.
+
+`--via page` never sends, `--via jev` ignores selectors, `--no-record` leaves
+the file alone. `jevb save flow.jevb` writes the steps you just drove by
+hand, selectors included. `jevb export flow.jevb` writes a plain Playwright
+script with no jevb and no model.
+
+**A 200 doesn't prove it happened.** On a real app, replaying a post with the
+thread id the page had generated got 200s on every request and added
+nothing. That's why `send` refuses a capture whose verdict is unsafe unless
+you pass `--force`, and why a flow with no check can't show that its action
+worked: add a `check` when it matters (it uses the page, not `send`).
+
+## Capture once, replay without the page
+
+Once a flow works, most of its time is the page: rendering, waiting, Jev
+picking controls. The work itself is usually one request. `--capture`
+saves the requests an action sends; `send` replays them in the same
+browser profile with no page in the loop.
+
+```bash
+jevb type the email field --as EMAIL -- me@example.com
+jevb type the password field --as PASSWORD -- "$PW"
+jevb act log in --capture login.json
+jevb type the item field -- blue pen
+jevb act place the order --capture order.json
+
+jevb send login.json            # EMAIL, PASSWORD from the env
+jevb send order.json TEXT_3="red pen"
+```
+
+A capture file holds no secrets:
+
+- **Typed text becomes a parameter**, `{{NAME}}` (`--as NAME`, or `${NAME}`
+  in a scenario; otherwise `TEXT_n`). It matches only whole values (a JSON
+  string, a form field), so a typed `1` doesn't rewrite every 1.
+- **Tokens become references** to where the page keeps them: a meta tag,
+  a hidden form input, a cookie, local or session storage, a global
+  object. CSRF headers, bearer tokens and form `authenticity_token`s are
+  read fresh at send time. A credential header or field with no such source
+  becomes a parameter instead of being written down.
+- **Cookies stay in the browser.** The Cookie header is dropped; requests go
+  through the browser context's own request client, so its cookie jar
+  (HttpOnly too) applies and a login's Set-Cookie lands there.
+
+`type --capture` records from before the first key, so live searches and
+autosaves are caught. This works on any site whose action is one or more
+fetch/xhr or form-post requests: logins, forms, orders, admin actions, API reads. Third-party
+requests (analytics) are left out. `send` stops at the first 4xx/5xx and
+exits 1. It skips the UI by design, so it proves the server took the
+data, not that the page works. On the test shop, an order took ~1.2s
+through the page and 2–5ms with `send` (warm; the first send opens one
+background page to read tokens from).
+
+In a scenario: a `capture <file>` line before an `act`/`type`, and
+`send <file> NAME=value` (other parameters come from the env, like
+`${NAME}`, and are redacted from results).
 
 ## Phones and simulators
 

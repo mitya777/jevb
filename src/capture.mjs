@@ -222,7 +222,8 @@ export function assess(cap, { wsFrames = 0, binary = false, responses = [], orde
         const literal = (k, v) => VOLATILE.test(k) && !String(v).includes('{{')
         for (const [k, v] of Object.entries(r.headers)) if (literal(k, v)) reasons.push(`one-time header ${k}`)
         let fields = []
-        try { fields = Object.entries(JSON.parse(body.replace(/\{\{[^}]+\}\}/g, 'x'))) } catch { fields = [...new URLSearchParams(body)] }
+        const nested = (o) => Object.entries(o).flatMap(([k, v]) => (v && typeof v === 'object' ? nested(v) : [[k, v]]))
+        try { fields = nested(JSON.parse(body.replace(/\{\{[^}]+\}\}/g, 'x'))) } catch { fields = [...new URLSearchParams(body)] }
         const query = r.url.includes('?') ? [...new URLSearchParams(r.url.slice(r.url.indexOf('?') + 1))] : []
         for (const [k, v] of [...fields, ...query]) if (literal(k, v)) reasons.push(`one-time field ${k}`)
         const stripped = `${r.url} ${body}`.replace(/\{\{[^}]+\}\}/g, '')
@@ -281,9 +282,12 @@ export async function send(capture, { context, pageFor, values = {}, env = proce
     // mustn't leave an earlier POST done, to be repeated on the retry.
     const missing = capture.params.filter((p) => vals[p] == null)
     if (missing.length) throw Object.assign(new Error(`${missing.join(', ')} ${missing.length > 1 ? 'have' : 'has'} no value: pass NAME=... or set it in the env`), { code: 'MISSING_PARAM' })
-    const readAll = async (reload) => {
+    // Only what this request uses: a login's cookie doesn't exist before the login.
+    const readAll = async (reload, r) => {
         const reloaded = new Set() // once per page, so every token comes from one load
+        const used = JSON.stringify(r)
         for (const [key, src] of Object.entries(capture.sources)) {
+            if (!used.includes(`{{${key}|`)) continue
             const page = `${src.origin} ${src.from === 'sessionStorage' ? 'tab' : 'helper'}`
             const first = reload && src.from !== 'cookie' && !reloaded.has(page)
             if (first) reloaded.add(page)
@@ -297,7 +301,7 @@ export async function send(capture, { context, pageFor, values = {}, env = proce
         const t = Date.now()
         // Before each request: the one before may have rotated a token.
         // attempted says whether anything had gone out if this throws.
-        try { await readAll(false) } catch (e) { throw Object.assign(e, { attempted: results.length }) }
+        try { await readAll(false, r) } catch (e) { throw Object.assign(e, { attempted: results.length }) }
         const once = () => context.request.fetch(fill(r.url, vals), {
             method: r.method,
             headers: Object.fromEntries(Object.entries(r.headers).map(([k, v]) => [k, fill(v, vals)])),
@@ -307,7 +311,7 @@ export async function send(capture, { context, pageFor, values = {}, env = proce
         let res = await once()
         if (hasTokens && [401, 403, 419, 422].includes(res.status())) {
             await res.dispose()
-            try { await readAll(true) } catch (e) { throw Object.assign(e, { attempted: results.length }) }
+            try { await readAll(true, r) } catch (e) { throw Object.assign(e, { attempted: results.length }) }
             res = await once()
         }
         const text = await res.text().catch(() => '')

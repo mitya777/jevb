@@ -150,6 +150,7 @@ test('assess: what makes a capture unsafe to replay', () => {
     assert.match(why(cap([req()]), { wsFrames: 2 }), /websocket/)
     assert.match(why(cap([req({ body: 'signature=abc&x=1' })])), /one-time field signature/)
     assert.match(why(cap([req({ body: '{"nonce":"abc"}' })])), /one-time field nonce/)
+    assert.match(why(cap([req({ body: '{"op":{"steps":[{"timestamp":17}]}}' })])), /one-time field timestamp/)
     assert.match(why(cap([req({ headers: { 'x-request-id': 'abc' } })])), /one-time header/)
     assert.match(why(cap([req({ body: `{"tx":"${'ab'.repeat(40)}"}` })])), /computed in the page/)
     assert.match(why(cap([req({ body: 'filename="a.png"' })])), /uploads a file/)

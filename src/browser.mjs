@@ -499,11 +499,19 @@ export class JevBrowser {
             const key = ({ r }) => `${r.method()} ${new URL(r.url()).origin}${new URL(r.url()).pathname}`
             own = own.filter((x, i) => !own.slice(i + 1).some((y) => key(y) === key(x)))
         }
-        await Promise.all(own.map(({ r }) => r.response().catch(() => null)))
+        // Same evidence as a whole flow: final status and what came back.
+        const answers = await Promise.all(own.map(async ({ r }) => {
+            let last = r
+            while (last.redirectedTo()) last = last.redirectedTo()
+            if (!done.has(last)) return { status: null, text: '' }
+            const res = await last.response().catch(() => null)
+            return { status: res?.status() ?? null, text: await Promise.race([res?.text().catch(() => ''), sleep(1_000).then(() => '')]) ?? '' }
+        }))
         const requests = own.map(({ r, headers }) => ({ method: r.method(), url: r.url(), headers, body: r.postData() }))
         const after = page.isClosed() ? [] : await capture.tokenSources(page)
         const cap = capture.build({ page: at, requests, params: this.typed.get(session || 'default') || [], sources: [...sources, ...after] })
-        cap.replay = capture.assess(cap)
+        cap.requests.forEach((c, i) => { c.status = answers[i].status })
+        cap.replay = capture.assess(cap, { responses: answers.map((a, i) => ({ order: i, text: a.text })), order: answers.map((_, i) => i) })
         fs.writeFileSync(file, JSON.stringify(cap, null, 2) + '\n')
         return { file, requests: cap.requests.map((r) => `${r.method} ${r.url}`), params: cap.params }
     }

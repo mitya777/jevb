@@ -273,3 +273,18 @@ test('send refuses a capture its verdict calls unsafe, unless forced', async () 
         assert.equal((await b.send(f, { force: true })).results[0].status, 204)
     } finally { await b.shutdown() }
 })
+
+test('send reads only the tokens each request uses', async () => {
+    const { send } = await import('../src/capture.mjs')
+    const asked = []
+    const context = {
+        cookies: async () => (asked.length ? [{ name: 'sid', value: 'fresh-after-login' }] : []),
+        request: { fetch: async (url, o) => { asked.push(o.headers.x || 'none'); return { status: () => 200, url: () => url, text: async () => '{}', dispose: async () => {} } } },
+    }
+    const cap = { params: [], sources: { '@0': { from: 'cookie', name: 'sid', origin: 'https://x.test' } }, requests: [
+        { method: 'POST', url: 'https://x.test/login', headers: {} },
+        { method: 'POST', url: 'https://x.test/order', headers: { x: '{{@0|raw}}' } },
+    ] }
+    await send(cap, { context, pageFor: async () => null })
+    assert.deepEqual(asked, ['none', 'fresh-after-login'])
+})

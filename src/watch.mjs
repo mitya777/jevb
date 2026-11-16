@@ -9,12 +9,13 @@
 const checkLine = (c) => `${c.negate ? 'refute' : 'check'}${c.threshold != null ? `@${c.threshold}` : ''} ${c.question}`
 
 // The scenario lines one daemon action stands for, or null if it isn't a step.
-export function stepLines(name, a, nextText) {
+export function stepLines(name, a, nextText, out) {
     const checks = (a.checks || []).map(checkLine)
+    const at = (t) => (t?.locator ? `  @@ ${t.locator}` : '') // what a repeat can use instead of Jev
     switch (name) {
         case 'open': return [...(a.platform ? [`platform ${a.platform}`] : []), ...(a.device ? [`device ${a.device}`] : []), ...(a.app ? [`app ${a.app}`] : []), a.url ? `open ${a.url}` : 'open']
-        case 'act': return [...checks, `act ${a.intent}`]
-        case 'type': return [...checks, `type ${a.intent} => \${${nextText()}}`, ...(a.submit ? ['press Enter'] : [])]
+        case 'act': return [...checks, `act ${a.intent}${at(out?.clicked)}`]
+        case 'type': return [...checks, `type ${a.intent} => \${${nextText()}}${at(out?.typed)}`, ...(a.submit ? ['press Enter'] : [])]
         case 'press': return [`press ${a.key}`]
         case 'scroll': return [`scroll ${a.dy ?? 600}`]
         case 'check': return [checkLine(a)]
@@ -26,13 +27,20 @@ export function stepLines(name, a, nextText) {
 }
 
 export class Watch {
+    // The session's current run, for `jevb save`.
+    scenario(session) {
+        const run = this.runs.get(session || 'default')
+        return run ? `${run.lines.join('\n')}\n` : null
+    }
+
     constructor({ minRun = 3, every = 5, gapMs = 60_000, now = Date.now } = {}) {
         Object.assign(this, { minRun, every, gapMs, now })
         this.runs = new Map() // session -> { steps, lines, texts, at }
     }
 
     // Call after an action succeeds. Returns a hint object or null.
-    record(name, a = {}) {
+    // out: the action's result, for the selector Jev's pick resolved to.
+    record(name, a = {}, out) {
         const key = a.session || 'default'
         // Steps a scenario can't replay end the run: a draft that skipped
         // an eval's setup wouldn't reproduce what worked.
@@ -42,7 +50,7 @@ export class Watch {
         if (!run || t - run.at > this.gapMs) run = { steps: 0, lines: [], texts: 0 }
         run.at = t
         this.runs.set(key, run)
-        const lines = stepLines(name, a, () => `TEXT_${++run.texts}`)
+        const lines = stepLines(name, a, () => `TEXT_${++run.texts}`, out)
         if (!lines?.length) return null
         run.steps++
         run.lines.push(...lines)

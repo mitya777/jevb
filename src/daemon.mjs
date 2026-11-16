@@ -1,6 +1,7 @@
 // Localhost JSON daemon so separate CLI calls (e.g. from Claude Code / Codex)
 // share one browser and its sessions. The CLI starts it on demand; it exits
 // on its own after JEVB_DAEMON_IDLE_MS without requests.
+import fs from 'node:fs'
 import http from 'node:http'
 import { JevBrowser } from './browser.mjs'
 import { JevDevice } from './device.mjs'
@@ -24,6 +25,7 @@ const ACTIONS = {
     checks: (b, a) => b.checks(a.checks || [], a),
     snap: (b, a) => b.snap(a),
     read: (b, a) => b.readText(a),
+    send: (b, a) => { if (!b.send) throw new Error('send needs a browser session'); return b.send(a.file, a) },
     shot: (b, a) => b.screenshot(a.path, a),
     close: (b, a) => b.close(a),
     pace: (b, a, d) => { if (a.pace) b.pace = d.pace = a.pace; return { pace: b.pace } },
@@ -49,11 +51,17 @@ export function serve() {
         armExit()
         const send = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)) }
         const name = req.url.slice(1)
-        if (req.method !== 'POST' || !(name in ACTIONS || name === 'stop')) return send(404, { error: `unknown action ${name}` })
+        if (req.method !== 'POST' || !(name in ACTIONS || name === 'stop' || name === 'save')) return send(404, { error: `unknown action ${name}` })
         let body = ''
         for await (const chunk of req) body += chunk
         try {
             const args = body ? JSON.parse(body) : {}
+            if (name === 'save') {
+                const text = watch?.scenario(args.session)
+                if (!text) return send(404, { error: 'nothing recorded in this session' })
+                fs.writeFileSync(args.file, text)
+                return send(200, { saved: args.file, steps: text.trim().split('\n').length })
+            }
             if (name === 'stop') {
                 send(200, { stopped: true })
                 await shutdownAll('stop')
@@ -61,7 +69,7 @@ export function serve() {
             }
             const useDevice = !['status', 'devices', 'pace'].includes(name) && onDevice(device, name, args)
             const out = await ACTIONS[name](useDevice ? device : browser, args, device)
-            const hint = watch?.record(name, args)
+            const hint = watch?.record(name, args, out)
             send(200, hint && !Array.isArray(out) ? { ...out, hint } : out)
         } catch (e) {
             send(500, { error: e.message, code: e.code, detail: e.detail, checks: e.checks })

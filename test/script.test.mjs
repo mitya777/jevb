@@ -67,6 +67,26 @@ test('a selector matching several elements is not used; "the first X" is never r
     assert.doesNotMatch(fs.readFileSync(first, 'utf8'), /@@/)
 })
 
+test('a failed run writes no selectors: it may have picked the wrong element', async () => {
+    const file = scenarioFile(CHECKED.replace('check is "Posted: hi there" shown?', 'check is "Never shown anywhere" shown?'))
+    const r = await run(file)
+    assert.equal(r.failed, 1, JSON.stringify(r.results))
+    assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /@@/)
+})
+
+test('by default a data-only flow never sends and leaves no capture', async () => {
+    const file = scenarioFile(ORDER)
+    const n = site.shop.orders.length
+    for (let i = 0; i < 2; i++) {
+        const r = await run(file)
+        assert.equal(r.failed, 0, JSON.stringify(r.results))
+        assert.equal(r.via, 'page')
+    }
+    assert.equal(fs.existsSync(`${file}.capture.json`), false)
+    assert.equal(site.shop.orders.length, n + 2, 'each run went through the page')
+    assert.match(fs.readFileSync(file, 'utf8'), /@@/, 'selectors still recorded')
+})
+
 test('--via jev ignores selectors and writes none', async () => {
     const file = scenarioFile(CHECKED.replace('act click "Post reply"', 'act click "Post reply"  @@ role=button[name="Post reply"s]'))
     const r = await run(file, { via: 'jev', record: true })
@@ -76,7 +96,7 @@ test('--via jev ignores selectors and writes none', async () => {
 
 test('a flow that only sends data replays by request once its capture says it can', async () => {
     const file = scenarioFile(ORDER)
-    const first = await run(file)
+    const first = await run(file, { via: 'send' })
     assert.equal(first.failed, 0, JSON.stringify(first.results))
     assert.equal(first.via, 'page')
     const cap = JSON.parse(fs.readFileSync(`${file}.capture.json`, 'utf8'))
@@ -87,7 +107,7 @@ test('a flow that only sends data replays by request once its capture says it ca
     jev.reset()
     const n = site.shop.orders.length
     fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('blue pen', 'red pen')) // typed text can change
-    const second = await run(file)
+    const second = await run(file, { via: 'send' })
     assert.equal(second.failed, 0, JSON.stringify(second.results))
     assert.equal(second.via, 'send')
     assert.equal(jev.requests.length, 0, 'no model at all')
@@ -97,11 +117,11 @@ test('a flow that only sends data replays by request once its capture says it ca
 
 test('another host, or a changed flow, re-records instead of sending', async () => {
     const file = scenarioFile(ORDER)
-    await run(file)
+    await run(file, { via: 'send' })
     const other = await fixtures()
     try {
         const n = site.shop.orders.length
-        const r = await runScenario(file, { baseUrl: other.base, onStep: () => {} })
+        const r = await runScenario(file, { baseUrl: other.base, via: 'send', onStep: () => {} })
         assert.equal(r.via, 'page')
         assert.equal(site.shop.orders.length, n, 'nothing went to the recorded host')
         assert.equal(other.shop.orders.length, 1)
@@ -110,10 +130,10 @@ test('another host, or a changed flow, re-records instead of sending', async () 
 
 test('a refused send (4xx) runs through the page; the capture is not trusted again', async () => {
     const file = scenarioFile(LOGIN)
-    await run(file)
+    await run(file, { via: 'send' })
     fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('pw-correct', 'wrong'))
     const steps = []
-    const r = await runScenario(file, { baseUrl: site.base, onStep: (x) => steps.push(x) })
+    const r = await runScenario(file, { baseUrl: site.base, via: 'send', onStep: (x) => steps.push(x) })
     assert.equal(r.via, 'page')
     assert.deepEqual(steps.filter((x) => x.via).map((x) => x.via), ['send', 'page'])
     assert.equal(JSON.parse(fs.readFileSync(`${file}.capture.json`, 'utf8')).replay.ok, false)
@@ -121,10 +141,10 @@ test('a refused send (4xx) runs through the page; the capture is not trusted aga
 
 test('a 5xx may have taken effect: the run fails and never repeats the order', async () => {
     const file = scenarioFile(ORDER)
-    await run(file)
+    await run(file, { via: 'send' })
     const n = site.shop.orders.length
     site.shop.fail = 500
-    const r = await run(file)
+    const r = await run(file, { via: 'send' })
     assert.equal(r.via, 'send')
     assert.equal(r.failed, 1)
     assert.match(r.results.at(-1).error, /not re-run/)
@@ -133,8 +153,8 @@ test('a 5xx may have taken effect: the run fails and never repeats the order', a
 
 test('a flow with a check always uses the page', async () => {
     const file = scenarioFile(`${ORDER}check is "placed" shown?\n`)
-    await run(file)
-    const r = await run(file)
+    await run(file, { via: 'send' })
+    const r = await run(file, { via: 'send' })
     assert.equal(r.via, 'page')
     assert.ok(r.scripted >= 4)
     assert.equal(fs.existsSync(`${file}.capture.json`), false)
@@ -165,10 +185,10 @@ test('assess: what makes a capture unsafe to replay', () => {
 test('chooseTier: every reason to stay on the page', () => {
     const steps = parse('open /\nact go  @@ text="Go"\n')
     const cap = { hash: 'h', replay: { ok: true } }
-    const base = { steps, cap, hash: 'h', pace: 'fast' }
+    const base = { steps, cap, hash: 'h', pace: 'fast', via: 'send' }
     assert.equal(chooseTier(base).tier, 'send')
     for (const [over, why] of [
-        [{ via: 'page' }, /via page/], [{ onDevice: true }, /phone/], [{ demo: true }, /recording/], [{ pace: 'human' }, /human/],
+        [{ via: 'auto' }, /opt-in/], [{ via: 'page' }, /via page/], [{ onDevice: true }, /phone/], [{ demo: true }, /recording/], [{ pace: 'human' }, /human/],
         [{ steps: parse('open /\ncheck ok?\n') }, /reads the page/], [{ steps: parse('open /\nact go\n') }, /no fixed target/], [{ steps: parse('open /\nact publish the newest post  @@ text="x"\n') }, /no fixed target/], [{ steps: parse('open /\nact? maybe\n') }, /reads the page/],
         [{ cap: null }, /no capture/], [{ hash: 'other' }, /changed/], [{ cap: { hash: 'h', replay: { ok: false, reasons: ['talks over a websocket'] } } }, /websocket/],
     ]) {
@@ -217,22 +237,22 @@ test('stableLocator: inner text hits, hidden duplicates, position only for a few
 test('a request that lands after its step is part of the flow, so replay sends it too', async () => {
     const file = scenarioFile('open shop.html\nact click "Late save"\n')
     const b0 = site.shop
-    const r = await run(file)
+    const r = await run(file, { via: 'send' })
     assert.equal(r.failed, 0, JSON.stringify(r.results))
     const cap = JSON.parse(fs.readFileSync(`${file}.capture.json`, 'utf8'))
     assert.deepEqual(cap.requests.map((x) => new URL(x.url).pathname), ['/api/autosave'])
     const n = b0.autosaves
-    assert.equal((await run(file)).via, 'send')
+    assert.equal((await run(file, { via: 'send' })).via, 'send')
     assert.equal(b0.autosaves, n + 1)
 })
 
 test('a redirected POST replays by request and its final status is what counts', async () => {
     const file = scenarioFile(`${LOGIN}act click "Reorder"\n`)
-    assert.equal((await run(file)).failed, 0)
+    assert.equal((await run(file, { via: 'send' })).failed, 0)
     const cap = JSON.parse(fs.readFileSync(`${file}.capture.json`, 'utf8'))
     assert.equal(cap.requests.at(-1).status, 201)
     const n = site.shop.orders.length
-    const r = await run(file)
+    const r = await run(file, { via: 'send' })
     assert.equal(r.via, 'send')
     assert.equal(r.failed, 0, JSON.stringify(r.results))
     assert.equal(site.shop.orders.length, n + 1)
@@ -263,7 +283,7 @@ test('changing a ${NAME} changes the flow; changing literal text does not', asyn
 
 test('a flow capture keeps only the last keystroke request, at human pace too', async () => {
     const file = scenarioFile('pace human\nopen shop.html\ntype the "Note" box => private\nact click "Like"\n')
-    const r = await run(file, { pace: 'human', via: 'page' })
+    const r = await run(file, { pace: 'human', via: 'send' })
     assert.equal(r.failed, 0, JSON.stringify(r.results))
     assert.equal(fs.existsSync(`${file}.capture.json`), true)
     const raw = fs.readFileSync(`${file}.capture.json`, 'utf8')

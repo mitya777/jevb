@@ -76,8 +76,9 @@ function redact(result) {
     return JSON.parse(json)
 }
 
-// via: auto (send when safe, else selectors, else Jev), page (never send), or
-// jev (no selectors either). record: false leaves the file as it is.
+// via: auto or page (selectors, else Jev), send (also capture the flow, and
+// replay its requests without the page when that's safe), or jev (no
+// selectors either). record: false leaves the file as it is.
 export async function runScenario(file, { pace, baseUrl, batch = true, onStep = console.log, device, app, via = 'auto', record = true } = {}) {
     if (fs.existsSync('.env')) { try { process.loadEnvFile('.env') } catch {} }
     const steps = parse(fs.readFileSync(file, 'utf8'))
@@ -97,7 +98,7 @@ export async function runScenario(file, { pace, baseUrl, batch = true, onStep = 
     const started = Date.now()
     const useLocators = via !== 'jev'
     const locators = new Map() // line -> selector to write
-    let scripted = 0, healed = 0
+    let scripted = 0, healed = 0, completed = false
     const ownCapture = steps.some((s) => s.cmd === 'capture' || s.cmd === 'send')
     const capFile = `${file}.capture.json`
     const hash = flowHash(steps, baseUrl)
@@ -119,7 +120,7 @@ export async function runScenario(file, { pace, baseUrl, batch = true, onStep = 
         const text = s.arg.split(/\s*=>\s*/)[1] ?? ''
         return { line: s.line, name: text.trim().match(/^\$\{([A-Z0-9_]+)\}$/)?.[1] || `TYPE_${n + 1}`, text }
     })
-    const flowCapture = !ownCapture && !onDevice && !b.demo && via !== 'jev' && onlyPutsData(steps)
+    const flowCapture = !ownCapture && !onDevice && !b.demo && via === 'send' && onlyPutsData(steps)
     let cap = null
     try { cap = JSON.parse(fs.readFileSync(capFile, 'utf8')) } catch {}
     const decision = ownCapture ? { tier: 'page', why: 'the scenario manages its own captures' } : chooseTier({ steps, cap, hash, via, pace: b.pace, demo: b.demo, onDevice })
@@ -250,9 +251,12 @@ export async function runScenario(file, { pace, baseUrl, batch = true, onStep = 
         }
         // A failed run's requests say nothing about what the flow should send.
         if (b.flow && !failed) await b.finishFlow(capFile, { hash })
+        completed = true
     } finally {
         if (b.flow) b.flow = null
-        if (locators.size) { try { writeLocators(file, locators) } catch (e) { onStep({ log: `could not write selectors: ${e.message}` }) } }
+        // A failed run may have clicked the wrong thing: a selector for it
+        // would skip Jev from then on and never be repaired.
+        if (locators.size && completed && !failed) { try { writeLocators(file, locators) } catch (e) { onStep({ log: `could not write selectors: ${e.message}` }) } }
         var { videos } = await b.shutdown('scenario done')
     }
     return { failed, results, videos, via: tier, scripted, healed, jevCalls: b.jevRequests, jevTokens: b.jevTokens, totalMs: lastWorkEnd - started }

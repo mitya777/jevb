@@ -231,7 +231,7 @@ Top tabs shown?" scores about 0.8.
 | `shot <path> [--full]` | screenshot |
 | `eval -- <js>` | run a function body in the page and print its result |
 | `send <file> [NAME=value …]` | replay a capture (`act/type --capture FILE`) without the page |
-| `run <file.jevb>` | run a scenario in-process (`--base`, `--pace`, `--no-batch`, `--via auto\|page\|jev`, `--no-record`) |
+| `run <file.jevb>` | run a scenario in-process (`--base`, `--pace`, `--no-batch`, `--via auto\|page\|send\|jev`, `--no-record`) |
 | `save <file.jevb>` | write this session's recent steps as a scenario, selectors included |
 | `export <file.jevb> [--out F]` | write a standalone Playwright script |
 | `close` · `stop` · `status` | end a session · stop everything · show state |
@@ -259,14 +259,17 @@ the front while you work; set `JEVB_FOREGROUND=1` to focus them instead.
 
 ## Repeats without the model
 
-`jevb run` gets cheaper each time, on its own. It picks the cheapest way that
-is safe for each flow, and every result says which it used (`via`, `why`).
+`jevb run` gets cheaper each time, on its own: the first run records a selector
+for each step, and later runs use them instead of asking Jev. Sending the
+requests without the page is opt-in (`--via send`), because it skips the UI: a
+scenario that tests the page would pass with the page broken. Every result
+says which way it used (`via`, `why`).
 
 | Way | Used when | Fake-Jev test shop |
 |---|---|---|
 | **Jev** picks each control | first run, or a step with no working selector | 4.3s (recording) |
 | **Selectors** recorded in the file | the flow reads the page (`check`, `read`, `shot`), or can't be sent safely | 2.1s, no picks |
-| **Send** the requests, no page | the flow only puts data in, and its capture passed every test below | 0.3–0.5s |
+| **Send** the requests, no page | `--via send`, the flow only puts data in, and its capture passed every test below | 0.3–0.5s |
 
 The first run writes a selector onto each step:
 
@@ -280,7 +283,7 @@ ask Jev and repairs the line. Intents that mean "whichever is there now"
 one of more than 3 look-alikes, like a Reply button in a feed. Checks still go
 to Jev: they're judgments.
 
-**A flow is sent only if** it has no step that reads the page, no `act?`, runs
+**A flow is sent only if** you passed `--via send`, it has no step that reads the page, no `act?`, runs
 in a browser at a non-human pace, was recorded on this host with these steps,
 and its capture shows no: websocket traffic, file upload or binary data,
 signature, nonce, timestamp or other per-request field, value computed in the
@@ -292,7 +295,7 @@ flow runs through the page and the capture isn't trusted again. A 5xx, a timeout
 a later failure or a changed status may have taken effect, so the run fails
 and nothing is repeated.
 
-`--via page` never sends, `--via jev` ignores selectors, `--no-record` leaves
+`--via page` (the same as the default `auto`) never sends, `--via jev` ignores selectors, `--no-record` leaves
 the file alone. `jevb save flow.jevb` writes the steps you just drove by
 hand, selectors included. `jevb export flow.jevb` writes a plain Playwright
 script with no jevb and no model.

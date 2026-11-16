@@ -82,7 +82,10 @@ export const onlyPutsData = (steps) => steps.length > 0 && steps.every((s) => IN
 // have, a wrong "page" only costs time, so anything unclear goes to the page.
 export function chooseTier({ steps, cap, hash, via = 'auto', pace, demo, onDevice }) {
     const page = (why) => ({ tier: 'page', why })
-    if (via !== 'auto') return page(`--via ${via}`)
+    // Sending skips the UI, so a test of the page could pass with the page
+    // broken: only when the caller asks for it.
+    if (via === 'auto') return page('sending requests is opt-in: --via send')
+    if (via !== 'send') return page(`--via ${via}`)
     if (onDevice) return page('runs on a phone')
     if (demo) return page('recording needs the page')
     if (pace === 'human' || steps.some((s) => s.cmd === 'pace' && s.arg === 'human')) return page('human pace tests the page')

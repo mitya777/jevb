@@ -52,9 +52,10 @@ const USAGE = `jevb <command> [args] [--pace human|agent|fast] [--fast] [--sessi
   update [--check]                 install the latest GitHub release (--check: only report)
   version
   run <scenario.jevb> [--base URL] [--device NAME --app FILE]
-                                   [--via auto|page|jev] [--no-record]
+                                   [--via auto|page|send|jev] [--no-record]
                                    records selectors in the file, then repeats
-                                   with no model; sends requests when safe
+                                   with no model; --via send also replays a
+                                   data-only flow's requests when safe
   save <file.jevb>                 this session's recent steps, with selectors
   export <file.jevb> [--out F]     a plain Playwright script
                                    run a scenario file in-process (for tests);

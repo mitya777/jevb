@@ -4,7 +4,7 @@
 // session stops, so callers must stop() promptly (the device backend does on
 // close, idle and daemon exit). Device Farm only runs in us-west-2.
 //
-// Credentials: profile "jevb" if present (see profile()), else the standard
+// Credentials: profile "jevb" if present (see awsProfile()), else the standard
 // AWS chain (AWS_PROFILE, AWS_ACCESS_KEY_ID/…, ~/.aws). Project: JEVB_DF_PROJECT_ARN, else a project named "jevb"
 // (created on first use).
 import fs from 'node:fs'
@@ -21,13 +21,18 @@ let client
 // A long-lived, Device-Farm-only IAM key in profile "jevb" (README) beats a
 // console login that expires; JEVB_AWS_PROFILE picks another profile, and
 // without either the standard chain applies (AWS_PROFILE, env keys, login).
-function profile() {
-    if (process.env.JEVB_AWS_PROFILE) return process.env.JEVB_AWS_PROFILE
-    const creds = path.join(os.homedir(), '.aws', 'credentials')
-    try { if (/^\[jevb\]\s*$/m.test(fs.readFileSync(creds, 'utf8'))) return 'jevb' } catch {}
+// The profile counts wherever the AWS files define it: [jevb] in
+// ~/.aws/credentials, or [profile jevb] in ~/.aws/config (a credential_process
+// or SSO profile has no entry in the credentials file).
+export function awsProfile(env = process.env, home = os.homedir()) {
+    if (env.JEVB_AWS_PROFILE) return env.JEVB_AWS_PROFILE
+    const has = (file, header) => {
+        try { return header.test(fs.readFileSync(path.join(home, '.aws', file), 'utf8')) } catch { return false }
+    }
+    if (has('credentials', /^\[jevb\]\s*$/m) || has('config', /^\[profile\s+jevb\]\s*$/m)) return 'jevb'
     return undefined
 }
-const df = () => (client ||= new DeviceFarmClient({ region: 'us-west-2', profile: profile() }))
+const df = () => (client ||= new DeviceFarmClient({ region: 'us-west-2', profile: awsProfile() }))
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 export async function projectArn() {

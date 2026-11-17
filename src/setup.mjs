@@ -59,7 +59,7 @@ export async function setup({ install = true } = {}) {
 
     // Optional extras: reported, never required.
     const optional = [
-        ['phones (AWS Device Farm)', !!(process.env.AWS_ACCESS_KEY_ID || process.env.AWS_PROFILE || process.env.JEVB_AWS_PROFILE || fs.existsSync(path.join(process.env.HOME || '', '.aws/credentials'))), 'AWS credentials with AWSDeviceFarmFullAccess (see README: Real phones)'],
+        ['phones (AWS Device Farm)', !!(process.env.AWS_ACCESS_KEY_ID || process.env.AWS_PROFILE || process.env.JEVB_AWS_PROFILE || ['credentials', 'config'].some((f) => fs.existsSync(path.join(process.env.HOME || '', '.aws', f)))), 'AWS credentials with AWSDeviceFarmFullAccess (see README: Real phones)'],
         ['phones (local Appium)', !!process.env.JEVB_APPIUM_URL, 'set JEVB_APPIUM_URL=http://127.0.0.1:4723 for a simulator, emulator or USB phone'],
         ['unlabeled-control naming (Claude)', !!process.env.ANTHROPIC_API_KEY, 'set ANTHROPIC_API_KEY to name unlabeled controls in native apps'],
     ].map(([name, ok, hint]) => ({ name, ok, ...(!ok && { hint }) }))

@@ -376,9 +376,9 @@ jevb needs AWS credentials allowed to use Device Farm
 (`AWSDeviceFarmFullAccess` is enough). It takes the first of:
 
 1. **`JEVB_AWS_PROFILE=<name>`**, a profile from `~/.aws`.
-2. **A profile named `jevb`** in `~/.aws/credentials`, used automatically. A
-   Device-Farm-only key there stays out of everything else (commands under
-   *Device Farm setup* below).
+2. **A profile named `jevb`** in `~/.aws/credentials` or `~/.aws/config`,
+   used automatically. A Device-Farm-only key there stays out of everything
+   else (commands under *Device Farm setup* below).
 3. **The standard AWS chain:** `AWS_PROFILE`, or `AWS_ACCESS_KEY_ID` and
    `AWS_SECRET_ACCESS_KEY` (plus `AWS_SESSION_TOKEN` for temporary
    credentials) in the environment or in `./.env`, or `aws login`.

@@ -57,6 +57,19 @@ const USAGE = `jevb <command> [args] [--pace human|agent|fast] [--fast] [--sessi
                                    with no model; --via send also replays a
                                    data-only flow's requests when safe
   save <file.jevb>                 this session's recent steps, with selectors
+  tabs [--match TEXT]              the open tabs of the attached Chrome (JEVB_CDP_URL), for a hand-over
+  qa run <scenario.jevb> --tab ID --prompt FILE --out DIR --recording-ok
+         [--client NAME --model NAME] [--pace human|agent|fast] [--publish-prompt] [--broadcast]
+                                   run the scenario in the one tab the user handed
+                                   over, record qa.mp4 + steps.json, write a
+                                   manifest binding the prompt to the movie, and
+                                   anchor its hash (dry run unless --broadcast)
+  qa verify <DIR> [--prompt F --movie F --manifest F --anchor F] [--chain]
+                                   check prompt + movie against the manifest and
+                                   the manifest against the anchor transaction
+  qa anchor <DIR> [--broadcast] [--publish-prompt]
+                                   (re-)anchor a bundle; --broadcast sends a real
+                                   BSV transaction paid by JEVB_BSV_WIF
   export <file.jevb> [--out F]     a plain Playwright script
                                    run a scenario file in-process (for tests);
                                    consecutive checks batch into one Jev call
@@ -85,7 +98,7 @@ function parseArgs(argv) {
         else if (a.startsWith('--')) {
             const k = a.slice(2)
             const next = argv[i + 1]
-            if (['enter', 'full', 'help', 'no-batch', 'attach', 'fast', 'no-record', 'force'].includes(k)) flags[k] = true
+            if (['enter', 'full', 'help', 'no-batch', 'attach', 'fast', 'no-record', 'force', 'recording-ok', 'publish-prompt', 'broadcast', 'chain'].includes(k)) flags[k] = true
             else if (k === 'check' || k === 'refute') { (flags[k] ||= []).push(next); i++ }
             else { flags[k] = next; i++ }
         } else pos.push(a)
@@ -155,6 +168,39 @@ async function main() {
         process.exitCode = failed ? 1 : 0
         return
     }
+    if (cmd === 'tabs') {
+        const { listTabs } = await import('../src/handover.mjs')
+        if (!process.env.JEVB_CDP_URL) throw new Error('set JEVB_CDP_URL to the Chrome holding the tab (see bin/jevb-chrome.sh)')
+        const m = (flags.match || '').toLowerCase()
+        return print({ tabs: (await listTabs(process.env.JEVB_CDP_URL)).filter((t) => !m || `${t.title} ${t.url}`.toLowerCase().includes(m)) })
+    }
+    if (cmd === 'qa') {
+        const qa = await import('../src/qa.mjs')
+        const [sub, target] = pos
+        if (sub === 'run') {
+            const res = await qa.runQa({
+                scenario: target, tabId: flags.tab, prompt: flags.prompt, out: flags.out || 'qa', pace: flags.pace || 'human',
+                client: { tool: flags.client, model: flags.model }, recordingOk: !!flags['recording-ok'],
+                publishPrompt: !!flags['publish-prompt'], broadcast: !!flags.broadcast,
+                ...(flags['max-hold'] && { maxHoldMs: Number(flags['max-hold']) }),
+                onStep: (r) => console.log(JSON.stringify(r)),
+            })
+            console.log(JSON.stringify({ done: true, ...res }))
+            process.exitCode = res.passed ? 0 : 1
+            return
+        }
+        if (sub === 'verify') {
+            const res = await qa.verifyBundle({ dir: target, prompt: flags.prompt, movie: flags.movie, manifest: flags.manifest, anchor: flags.anchor, steps: flags.steps, chain: !!flags.chain })
+            print(res)
+            process.exitCode = res.ok ? 0 : 1
+            return
+        }
+        if (sub === 'anchor') {
+            const res = await qa.anchorBundle(target, { broadcast: !!flags.broadcast, publishPrompt: !!flags['publish-prompt'] })
+            return print({ ...res, rawtx: `${res.rawtx.length / 2} bytes, in anchor.json` })
+        }
+        console.error(USAGE); process.exitCode = 2; return
+    }
     if (cmd === 'export') {
         const { parse } = await import('../src/scenario.mjs')
         const { toPlaywright } = await import('../src/script.mjs')
@@ -199,4 +245,4 @@ async function main() {
     if (!ok || (Array.isArray(checkList) && checkList.some((c) => !c.pass)) || body.ok === false) process.exitCode = 1
 }
 
-main().catch((e) => { print({ error: e.message }); process.exitCode = 1 })
+main().catch((e) => { print({ error: e.message, ...(e.code && { code: e.code }), ...(e.detail && { detail: e.detail }) }); process.exitCode = 1 })

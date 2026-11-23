@@ -9,6 +9,11 @@
 // the popups they open. Chrome may announce a new tab before it answers
 // createTarget, so while a create is in flight, messages are queued until
 // the answer says whether an unknown tab is jevb's.
+//
+// Hand-over mode (`only: targetId`, for `jevb qa`): the user gave jevb one
+// tab of theirs. That tab is the only one Playwright sees; its popups are
+// detached like any other tab; and the commands that would open, close,
+// focus or attach to another tab are refused here, before Chrome sees them.
 import { ws as WebSocket, wsServer as WebSocketServer } from 'playwright-core/lib/utilsBundle'
 
 const OWN_ID = 1_000_000_000 // ids for the proxy's own commands; Playwright's start at 1
@@ -24,14 +29,14 @@ export async function browserWsUrl(cdpUrl) {
 
 // Start the proxy for one client connection. Resolves to the ws:// URL to
 // hand connectOverCDP; it closes when either side does.
-export async function startCdpFilter(cdpUrl, { log = () => {} } = {}) {
+export async function startCdpFilter(cdpUrl, { log = () => {}, only } = {}) {
     const upstreamUrl = await browserWsUrl(cdpUrl)
     const server = new WebSocketServer({ host: '127.0.0.1', port: 0 })
     await new Promise((resolve, reject) => { server.once('listening', resolve); server.once('error', reject) })
     server.once('connection', (client) => {
         server.close()
         const upstream = new WebSocket(upstreamUrl, { perMessageDeflate: false, maxPayload: 256 * 1024 * 1024 })
-        const filter = new CdpFilter({ toClient: (m) => client.send(m), toBrowser: (m) => upstream.send(m), log })
+        const filter = new CdpFilter({ toClient: (m) => client.send(m), toBrowser: (m) => upstream.send(m), log, only })
         const early = []
         client.on('message', (data) => (upstream.readyState === WebSocket.OPEN ? filter.fromClient(String(data)) : early.push(String(data))))
         upstream.on('open', () => { for (const m of early.splice(0)) filter.fromClient(m) })
@@ -45,9 +50,9 @@ export async function startCdpFilter(cdpUrl, { log = () => {} } = {}) {
 
 // The filtering itself, transport-free so it can be tested with plain arrays.
 export class CdpFilter {
-    constructor({ toClient, toBrowser, log = () => {} }) {
-        Object.assign(this, { toClient, toBrowser, log })
-        this.ours = new Set()           // targetIds jevb may see
+    constructor({ toClient, toBrowser, log = () => {}, only = null }) {
+        Object.assign(this, { toClient, toBrowser, log, only })
+        this.ours = new Set(only ? [only] : []) // targetIds jevb may see
         this.foreign = new Set()        // sessionIds of detached tabs; drop their stragglers
         this.creates = new Set()        // session:id of Target.createTarget calls in flight
         this.queue = []                 // browser messages held while a create is in flight
@@ -57,9 +62,32 @@ export class CdpFilter {
 
     fromClient(raw) {
         const msg = JSON.parse(raw)
+        const refusal = this.only && this.refuse(msg)
+        if (refusal) {
+            this.log(`refused ${msg.method}: ${refusal}`)
+            this.toClient(JSON.stringify({ id: msg.id, ...(msg.sessionId && { sessionId: msg.sessionId }), error: { code: -32000, message: `jevb: ${refusal}` } }))
+            return
+        }
         // jevb opens tabs over a browser CDP session too, so any session counts.
         if (msg.method === 'Target.createTarget') this.creates.add(`${msg.sessionId || ''}:${msg.id}`)
         this.toBrowser(raw)
+    }
+
+    // Hand-over mode: what jevb may not ask Chrome to do with the user's tabs.
+    refuse(msg) {
+        const p = msg.params || {}
+        switch (msg.method) {
+            case 'Target.createTarget': return 'confined to the handed-over tab; opening another tab is refused'
+            case 'Target.closeTarget': return 'the handed-over tab belongs to the user; closing it is refused'
+            case 'Browser.close': case 'Browser.crashGpuProcess': return 'the browser belongs to the user'
+            case 'Target.activateTarget': case 'Page.bringToFront': return 'jevb never brings a tab or window to the front'
+            // A browser-level session is how Playwright reaches a page's own
+            // session; whatever it sends passes through this same check.
+            case 'Target.attachToTarget': return p.targetId === this.only ? null : 'confined to the handed-over tab'
+            case 'Target.exposeDevToolsProtocol': case 'Target.createBrowserContext': case 'Target.disposeBrowserContext':
+                return 'confined to the handed-over tab'
+            default: return null
+        }
     }
 
     fromBrowser(raw) {
@@ -92,7 +120,7 @@ export class CdpFilter {
             const { sessionId, targetInfo: t, waitingForDebugger } = msg.params
             // 'browser' = a session jevb asked for (newBrowserCDPSession).
             if (t.type === 'browser' || this.ours.has(t.targetId)) return 'forward'
-            if (t.openerId && this.ours.has(t.openerId)) { this.ours.add(t.targetId); return 'forward' }
+            if (!this.only && t.openerId && this.ours.has(t.openerId)) { this.ours.add(t.targetId); return 'forward' }
             if (this.creates.size) return 'wait'
             this.detach(sessionId, waitingForDebugger)
             return 'drop'

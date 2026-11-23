@@ -233,6 +233,7 @@ Top tabs shown?" scores about 0.8.
 | `send <file> [NAME=value …]` | replay a capture (`act/type --capture FILE`) without the page |
 | `run <file.jevb>` | run a scenario in-process (`--base`, `--pace`, `--no-batch`, `--via auto\|page\|send\|jev`, `--no-record`) |
 | `save <file.jevb>` | write this session's recent steps as a scenario, selectors included |
+| `tabs` · `qa run\|verify\|anchor` | hand over a signed-in tab and record a QA movie with a proof (see *QA movies*) |
 | `export <file.jevb> [--out F]` | write a standalone Playwright script |
 | `close` · `stop` · `status` | end a session · stop everything · show state |
 | `setup` · `update [--check]` · `version` | |
@@ -256,6 +257,79 @@ tabs open, so a page you're signed in to stays put; `close` closes its tab.
 Set `JEVB_CLOSE_TABS=1` to close jevb's tabs on idle and `stop` too.
 jevb opens its tabs in the background, so the browser window never jumps to
 the front while you work; set `JEVB_FOREGROUND=1` to focus them instead.
+
+## QA movies from a handed-over tab
+
+`jevb qa` records a QA movie of your running app in **one tab you're already
+signed in to and hand over**, and writes a proof that binds the prompt you
+gave to that movie. It ships as an OpenAI Codex plugin in
+[`plugins/jevb-qa`](plugins/jevb-qa) (a skill that drives these commands),
+and works the same from any agent or by hand.
+
+```bash
+export JEVB_CDP_URL=http://127.0.0.1:9333   # the Chrome from bin/jevb-chrome.sh, signed in to your app
+jevb tabs                                   # pick the tab; jevb never picks for you
+jevb qa run flow.jevb --tab <id> --prompt prompt.txt --out qa-run --recording-ok
+jevb qa verify qa-run                       # prompt + movie vs manifest vs transaction
+```
+
+**The tab.** jevb acts only in the tab you picked. Playwright never sees your
+other tabs; opening, closing, focusing or attaching to a tab is refused at the
+DevTools connection; `open` stays on the tab's site; popups are left alone.
+It never signs out, types into password or one-time-code fields, or touches
+credentials, account, security or billing settings: a scenario that asks is
+refused before it starts, and a click that Jev aims at a "Log out" control is
+refused before it lands. No `${SECRET}` values, `eval`, `capture` or `send`.
+When it's done (or fails, or idles) it removes its cursor and caption overlay,
+detaches, and leaves the tab open where it was. Chrome only paints the tab
+showing in its window, so that tab must be the visible one in its window
+(the window needn't be in front).
+
+**The movie.** `qa.mp4` (H.264) from Chrome's screencast of that tab, at
+`human` pace with jevb's cursor, a caption of each step and what Jev picked,
+and a DONE/FAILED banner. It starts as step 1 begins, and no still frame is
+held over 1.2s (`--max-hold`), so page loads and model calls shrink to a beat.
+`steps.json` has every step with `ok`, its check scores, and `movieAt`, the
+second it shows up in the movie. **It records whatever is on that page**,
+which is why `qa run` refuses until you pass `--recording-ok`.
+
+**The proof.** `manifest.json` holds the SHA-256 of the exact prompt bytes,
+of the movie and of the step log, the scenario text, the client's tool and
+model (as the client reports them: `--client`, `--model`, marked
+unverified), jevb's version, the app's origin and the times. Its hash
+(SHA-256 of the manifest as sorted-key JSON) goes in a Bitcoin SV
+transaction, in an `OP_FALSE OP_RETURN "jevb.qa" 0x01 <hash>` output.
+`anchor.json` keeps the raw transaction.
+
+- Proves: this prompt text and this movie file were bound together no later
+  than the transaction's block time, and none of them has changed since.
+- Does not prove: that the movie is an honest, unedited capture of the app,
+  that the steps follow the prompt, or which model wrote them.
+
+`jevb qa verify` checks each file's hash against the manifest, the manifest's
+hash against the transaction, and the transaction id against its bytes;
+`--chain` also fetches the transaction from WhatsOnChain and reports its
+block time. It exits 1 on any mismatch.
+
+**Anchoring is a dry run by default:** the transaction is built and signed
+with a throwaway key over a made-up input, never sent, and establishes no
+time. A real anchor is public and permanent:
+
+```bash
+JEVB_BSV_WIF=... jevb qa anchor qa-run --broadcast   # a funded mainnet key you control; ~100-300 sat
+```
+
+Only hashes go onchain; `--publish-prompt` also writes the prompt text in
+clear, forever. `JEVB_BSV_API` swaps the WhatsOnChain endpoint and
+`JEVB_BSV_FEE_PER_KB` the fee rate (500 sat/kB). Needs `ffmpeg` on the PATH.
+
+**Codex.** The plugin is in the portable format (`plugin.json` with
+`extensions.com.openai`, `skills/qa-movie/SKILL.md`). This repo is a local
+marketplace (`.agents/plugins/marketplace.json`):
+`codex plugin marketplace add /path/to/jevb`, then
+`codex plugin add jevb-qa@jevb-local`. It runs the jevb CLI
+on your machine, so it needs a desktop or CLI client; it does not run in
+ChatGPT on the web.
 
 ## Repeats without the model
 
@@ -488,6 +562,7 @@ from (see [.env.example](.env.example)). Shell variables win.
 | `JEVB_WAIT_MS` | how long checks and actions wait for the screen (4000; 0 = off) |
 | `JEVB_HEADED=1` · `JEVB_DEMO=1` · `JEVB_VIDEO=<dir>` | show the window · draw a cursor and a HUD of Jev's picks · record a `.webm` per session |
 | `JEVB_IDLE_MS` · `JEVB_DAEMON_IDLE_MS` · `JEVB_PORT` | browser idle close (2 min) · daemon exit (15 min) · daemon port (7788) |
+| `JEVB_BSV_WIF` · `JEVB_BSV_API` · `JEVB_BSV_FEE_PER_KB` | only for `jevb qa anchor --broadcast`: the paying key (never in a file in the repo) · WhatsOnChain endpoint · fee rate (500 sat/kB) |
 | `JEVB_CDP_URL` · `JEVB_CLOSE_TABS=1` · `JEVB_FOREGROUND=1` | attach to a running Chrome · close jevb's tabs on idle and `stop` · focus jevb's tabs instead of opening them in the background |
 | `JEVB_CDP_PORT` · `JEVB_CHROME_PROFILE` · `JEVB_CHROME_PROFILE_DIR` | for `bin/jevb-chrome.sh`: DevTools port (9333) · profile folder (`~/.jevb/chrome-profile`) · which Chrome profile inside it to open |
 | `AWS_ACCESS_KEY_ID` · `AWS_SECRET_ACCESS_KEY` · `AWS_SESSION_TOKEN` · `JEVB_AWS_PROFILE` | Device Farm credentials (see *Phones and simulators*) |

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "jevb-qa",
+  "version": "0.1.0",
+  "description": "Record a QA movie of your running app in a browser tab you are signed in to and hand over, with a step log and a proof that binds your prompt to the movie (a hash anchored on Bitcoin SV).",
+  "author": {
+    "name": "Dmitriy Fabrikant",
+    "url": "https://github.com/mitya777/jevb"
+  },
+  "homepage": "https://github.com/mitya777/jevb#qa-movies-from-a-handed-over-tab",
+  "repository": "https://github.com/mitya777/jevb",
+  "license": "MIT",
+  "keywords": ["qa", "testing", "browser", "video", "provenance", "bsv"],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "jevb QA movie",
+        "shortDescription": "QA movies of your app",
+        "longDescription": "Say what to test in your running app and hand over one browser tab you are already signed in to. The agent writes the steps, jevb runs them in that tab only and records an MP4 with a cursor and step captions, plus a pass/fail step log. A manifest binds the SHA-256 of your exact prompt to the SHA-256 of the movie, and its hash can be anchored in a Bitcoin SV transaction so anyone can later check that neither was swapped. Runs locally: needs the jevb CLI, ffmpeg and a Chrome started with remote debugging. jevb never signs out, enters passwords or changes account settings, and never closes your tab.",
+        "developerName": "Dmitriy Fabrikant",
+        "category": "Developer Tools",
+        "capabilities": [
+          "Record a QA movie in a signed-in tab you choose",
+          "Pass/fail step log for each check",
+          "Prompt-to-movie proof with a BSV anchor",
+          "Verify a proof bundle"
+        ],
+        "defaultPrompt": [
+          "Record a QA movie: add a note called milk and check it shows in the list.",
+          "Verify the QA proof in ./qa-run.",
+          "Which of my open tabs can I hand over for a QA run?"
+        ],
+        "composerIcon": "./assets/logo.png",
+        "logo": "./assets/logo.png",
+        "websiteURL": "https://github.com/mitya777/jevb",
+        "supportURL": "https://github.com/mitya777/jevb/issues"
+      }
+    }
+  }
+}

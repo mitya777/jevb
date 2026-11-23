@@ -1,0 +1,12 @@
+{
+  "name": "jevb-local",
+  "interface": { "displayName": "jevb (local)" },
+  "plugins": [
+    {
+      "name": "jevb-qa",
+      "source": { "source": "local", "path": "./plugins/jevb-qa" },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "category": "Developer Tools"
+    }
+  ]
+}

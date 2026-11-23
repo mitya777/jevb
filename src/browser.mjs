@@ -57,7 +57,7 @@ export class JevBrowser {
             // Attached: through a proxy that hides the user's own tabs, so a
             // hung one can't stall the attach (see cdp-filter.mjs).
             const b = this.cdpUrl
-                ? await chromium.connectOverCDP(await startCdpFilter(this.cdpUrl, { log: this.log }))
+                ? await chromium.connectOverCDP(await startCdpFilter(this.cdpUrl, { log: this.log, ...this.cdpFilter }))
                 : await chromium.launch({ headless: this.headless })
             b.on('disconnected', () => { this.browser = null; this.sessions.clear(); this.overlayAdded = false })
             this.log(`${this.cdpUrl ? `attached to ${this.cdpUrl}` : 'chromium up'} in ${Date.now() - t}ms`)

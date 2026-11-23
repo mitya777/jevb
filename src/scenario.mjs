@@ -79,7 +79,9 @@ function redact(result) {
 // via: auto or page (selectors, else Jev), send (also capture the flow, and
 // replay its requests without the page when that's safe), or jev (no
 // selectors either). record: false leaves the file as it is.
-export async function runScenario(file, { pace, baseUrl, batch = true, onStep = console.log, device, app, via = 'auto', record = true } = {}) {
+// browser: a prepared JevBrowser to run in (jevb qa passes one confined to a
+// handed-over tab); it is shut down at the end like one made here.
+export async function runScenario(file, { pace, baseUrl, batch = true, onStep = console.log, device, app, via = 'auto', record = true, browser } = {}) {
     if (fs.existsSync('.env')) { try { process.loadEnvFile('.env') } catch {} }
     const steps = parse(fs.readFileSync(file, 'utf8'))
     // Fail before renting a phone: a missing key or ${NAME} used to surface
@@ -87,7 +89,7 @@ export async function runScenario(file, { pace, baseUrl, batch = true, onStep = 
     apiKey()
     for (const s of steps) if (s.cmd === 'type') expand(s.arg.split(/\s*=>\s*/)[1] ?? '')
     const onDevice = !!(device || app) || steps.some((s) => ['device', 'app', 'platform'].includes(s.cmd))
-    const b = onDevice ? new JevDevice({ pace, log: (m) => onStep({ log: m }) }) : new JevBrowser({ pace, idleMs: 10 * 60_000 })
+    const b = browser || (onDevice ? new JevDevice({ pace, log: (m) => onStep({ log: m }) }) : new JevBrowser({ pace, idleMs: 10 * 60_000 }))
     const deviceOpts = { ...(device && { device }), ...(app && { app }) } // consumed by the next open
     const target = (arg) => (arg && baseUrl ? new URL(arg, baseUrl).href : arg || undefined)
     const results = []

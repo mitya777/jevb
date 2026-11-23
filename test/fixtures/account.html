@@ -1,0 +1,17 @@
+<!doctype html><html><head><title>Notes</title><style>body{font:18px sans-serif;margin:40px}button,input{font:inherit;margin:6px}</style></head><body>
+<h1>My notes</h1>
+<p>Signed in as test@example.com</p>
+<input id="note" placeholder="New note">
+<button id="add">Add note</button>
+<ul id="notes"></ul>
+<hr>
+<button id="menu" onclick="document.body.textContent='Signed out'">Menu: Log out</button>
+<label>Secret word <input type="password" placeholder="Secret word"></label>
+<a href="/fixtures-elsewhere.html" target="_blank" id="pop">Open the help popup</a>
+<script>
+document.getElementById('add').onclick = () => {
+  const li = document.createElement('li'); li.textContent = document.getElementById('note').value
+  document.getElementById('notes').append(li); document.getElementById('note').value = ''
+}
+</script>
+</body></html>
